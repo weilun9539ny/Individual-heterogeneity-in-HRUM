@@ -47,3 +47,9 @@ po/*~
 
 # RStudio Connect folder
 rsconnect/
+
+# reference papers
+*.pdf
+
+# data
+*.rds

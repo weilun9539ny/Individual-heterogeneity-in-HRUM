@@ -1,0 +1,46 @@
+---
+title: "Replicate Binary Logit Model and Heterogeneous Random Utility Model"
+author: "Wei-Lun, Lin"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(kableExtra)
+```
+
+
+## Data
+
+First read the data.
+
+```{r}
+global_data <- read_rds("../1-data/2-processed/nbh_clean_conjoint_global.rds")
+global_data %>% 
+  head() %>% 
+  kable("html", caption="First 6 Row of CANDOUR Survey") %>% 
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F) %>%
+  scroll_box(height = "500pt")
+```
+
+
+## Binary Logit Regression Model
+
+```{r}
+
+```
+
+
+
+
+## Heterogeneous Random Utility Model (HRUM)
+
+```{r}
+
+```
+
+
+
