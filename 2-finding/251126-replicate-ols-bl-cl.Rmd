@@ -18,7 +18,9 @@ library(lmtest)
 library(multiwayvcov)
 ```
 
--  背景: 複製 Duch et al., (2021) 所做的 OLS，也分析 conditional logit regression model，用於驗證之後 HRUM 分析的結果。
+-   背景: 複製 Duch et al., (2021) 所做的 binary logit model，也分析 conditional logit regression model，用於驗證之後 HRUM 分析的結果。並且把兩種模型的參數估計結果畫在同一張圖上，複製 proposal 上的結果。
+-   結果: 成功複製 proposal 上的圖，說明 proposal 的 HRUM 的確應為 conditional logit model。
+-   未來工作：寫出 HRUM，並且比較三者在分析此筆資料時的運算速度。
 
 
 ## Data and Functions
@@ -26,7 +28,7 @@ library(multiwayvcov)
 First read the data.
 
 ```{r import-data}
-global_data <- read_rds("../1-data/2-processed/nbh_clean_conjoint_global.rds")
+global_data <- read_rds("../1-data/2-processed/conjoint_data.rds")
 global_data %>% 
   head() %>% 
   kable("html", caption="First 6 Row of CANDOUR Survey") %>% 
@@ -40,47 +42,65 @@ And import functions from other file.
 source("./0-code/functions.R")
 ```
 
+## Model Fitting
+
+Prepare a data frame to store the results of different models.
+The data frame contains estimates and 95% confidence interval (CI) of each model.
+
+```{r res-all}
+est.all <- data.frame()
+```
 
 
-## Linear Regression Model
+### Linear Regression Model
 
 ```{r ols}
-ols.model <- global_data %>% 
-  glm(
-    select ~ vulnerability + transmission + income + occupation + age_category,
-    family = gaussian,
-    data=.
-  )
+ols.model <- glm(
+  select ~ vulnerability + transmission + income + occupation + age_category,
+  family = gaussian,
+  data = global_data
+)
 
 ols.vcovCL <- cluster.vcov(ols.model, global_data[["country"]], df_correction = FALSE)
 ols.res <- coeftest(ols.model, ols.vcovCL) %>% 
   tidy() %>% 
   filter(term != "(Intercept)") %>% 
   results_tidy(.)
+
+est.all <- ols.res %>% 
+  select(-c(statistic, p.value)) %>% 
+  mutate(
+    CI.lower = estimate - 1.96*std.error,
+    CI.upper = estimate + 1.96*std.error
+  ) %>% 
+  rename_with(~ paste0(.x, ".OLS"), .cols = -c(term, attribute)) %>% 
+  relocate(attribute, .before=1)
 ```
 
-Result of OLS
+Result of OLS.
 
 ```{r ols-res}
 ols.res %>%
+  mutate(estimate = log(estimate)) %>% 
+  mutate_if(is.numeric, ~ round(.x, 3)) %>% 
   kable("html", caption="Result of Linear Regression Model") %>% 
   kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F) %>%
   scroll_box(height = "500pt")
 ```
 
 
-Plot the result
+Plot the result of OLS.
 
 ```{r ols-plot}
 ols.plot <- plot_result(ols.res) +
   ggtitle("Estimation Result of Linear Regression Model")
-ggsave("./1-figure/res-OLS.png", ols.plot)
+# ggsave("./1-figure/res-OLS.png", ols.plot)
 
 ols.plot
 ```
 
 
-## Binary Logit Regression Model
+### Binary Logit Regression Model
 
 ```{r bl}
 bl.model <- global_data %>% 
@@ -95,47 +115,68 @@ bl.res <- coeftest(bl.model, bl.vcovCL) %>%
   tidy() %>% 
   filter(term != "(Intercept)") %>% 
   results_tidy(.)
+
+est.all <- bl.res %>% 
+  select(-c(statistic, p.value, attribute)) %>% 
+  mutate(
+    CI.lower = estimate - 1.96*std.error,
+    CI.upper = estimate + 1.96*std.error
+  ) %>% 
+  rename_with(~ paste0(.x, ".BL"), .cols = -c(term)) %>% 
+  left_join(est.all, ., by = join_by(term))
 ```
 
-Result of binary logit
+Result of BL.
 
 ```{r bl-res}
 bl.res %>%
+  mutate_if(is.numeric, ~ round(.x, 3)) %>% 
   kable("html", caption="Result of Binary Logistic Regression Model") %>% 
   kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F) %>%
   scroll_box(height = "500pt")
 ```
 
 
-Plot the result
+Plot the result of BL.
 
 ```{r bl-plot}
 bl.plot <- plot_result(bl.res) +
   ggtitle("Estimation Result of Binary Logit Regression Model")
 
-ggsave("./1-figure/res_bl.png", bl.plot)
+ggsave("./1-figure/res-BL.png", bl.plot)
 bl.plot
 ```
 
 
-### Conditional Logit Model
+### Conditional Logit Regression Model
 
 ```{r cl}
 cl.model <- clogit(
-  select ~ vulnerability + transmission + income + occupation + age_category + strata(trial_index),
+  select ~ vulnerability + transmission + income + occupation + age_category + strata(trial_id),
   data = global_data
 )
 
-cl.vcovCL <- cluster.vcov(cl.model, global_data[["country"]], df_correction = FALSE)
-cl.res <- coeftest(cl.model, cl.vcovCL) %>% 
+# cl.vcovCL <- cluster.vcov(cl.model, global_data[["country"]], df_correction = FALSE)
+# cl.res <- coeftest(cl.model, cl.vcovCL) %>% 
+cl.res <- cl.model %>% 
   tidy() %>% 
   filter(term != "(Intercept)") %>% 
   results_tidy(.)
+
+est.all <- cl.res %>% 
+  select(-c(statistic, p.value, attribute)) %>% 
+  mutate(
+    CI.lower = estimate - 1.96*std.error,
+    CI.upper = estimate + 1.96*std.error
+  ) %>% 
+  rename_with(~ paste0(.x, ".CL"), .cols = -c(term)) %>% 
+  left_join(est.all, ., by = join_by(term))
 ```
 
 
 ``` {r cl-res}
-cl_res_df %>% 
+cl.res %>% 
+  mutate_if(is.numeric, ~ round(.x, 3)) %>% 
   kable("html", caption="Result of Conditional Logistic Regression Model") %>% 
   kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F) %>%
   scroll_box(height = "500pt")
@@ -143,25 +184,47 @@ cl_res_df %>%
 
 
 ```{r cl-plot}
-ggplot(cl_res_df, aes(x=estimate, y=term)) +
-  geom_point(position = position_dodge(width = 0.7)) +
-  geom_errorbarh(
-      aes(xmin = estimate - 1.96*std.error, xmax = estimate + 1.96*std.error),
-      position = position_dodge(width = 0.7),
-      size = 0.5
-    ) +
-  geom_vline(xintercept = 0, linetype = "dashed") +
-  theme(strip.text = element_text(face = "bold.italic")) +
-  aes(color = "firebrick2", height = 0.5) +
-  facet_grid(attribute ~ ., space = "free", scales = "free_y",) +
-  labs(x = "Estimate", y = "", color = "") +
-  scale_y_discrete(limits = rev(levels("term"))) +
-  theme(
-    legend.position = "none",
-    text = element_text(size = 12),
-    strip.text = element_text(size = 12),
-    axis.text.y = element_text(size = 12),
-    legend.text = element_text(size = 12)
-  )
+cl.plot <- plot_result(cl.res) +
+  ggtitle("Estimation Result of Conditional Logit Regression Model")
+
+# ggsave("./1-figure/res-CL.png", cl.plot)
+cl.plot
 ```
+
+
+## Comparison Between Binary and Conditional Logit
+
+Draw the estimates and the corresponding CIs of the 2 models on the same plot.
+
+```{r plot-all}
+est.all %>% 
+  select(-ends_with("OLS")) %>% 
+  pivot_longer(
+    cols = -c(attribute, term),
+    names_to = c(".value", "model"),
+    names_pattern = "(.*)\\.(OLS|BL|CL)$"
+  ) %>%  
+  ggplot(aes(x=estimate, y=term, col=model)) +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  geom_point(alpha=.7) +
+  geom_errorbarh(
+    aes(xmin = CI.lower, xmax = CI.upper), 
+    alpha=.7, linewidth=.5
+  ) +
+  # facet_grid(attribute ~ ., space = "free", scales = "free_y") +
+  labs(
+    x = "Effect estimate", y="", col="Model",
+    title = "Effect Estimates of Three Models"
+  )+
+  theme_light() +
+  theme(
+      legend.position = "bottom",
+      text = element_text(size = 12),
+      strip.text = element_text(size = 12),
+      axis.text.y = element_text(size = 12),
+      legend.text = element_text(size = 12)
+    )
+ggsave("./1-figure/res-BL_CL.png")
+```
+
 
