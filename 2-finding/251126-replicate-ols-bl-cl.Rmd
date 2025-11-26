@@ -1,0 +1,167 @@
+---
+title: "Replicate Binary Logit Model and Heterogeneous Random Utility Model"
+author: "Wei-Lun, Lin"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)  # data processing
+library(broom)
+library(kableExtra)  # print table
+library(survival)
+
+library(sandwich)
+library(lmtest)
+library(multiwayvcov)
+```
+
+-  背景: 複製 Duch et al., (2021) 所做的 OLS，也分析 conditional logit regression model，用於驗證之後 HRUM 分析的結果。
+
+
+## Data and Functions
+
+First read the data.
+
+```{r import-data}
+global_data <- read_rds("../1-data/2-processed/nbh_clean_conjoint_global.rds")
+global_data %>% 
+  head() %>% 
+  kable("html", caption="First 6 Row of CANDOUR Survey") %>% 
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F) %>%
+  scroll_box(height = "500pt")
+```
+
+And import functions from other file.
+
+```{r import-function}
+source("./0-code/functions.R")
+```
+
+
+
+## Linear Regression Model
+
+```{r ols}
+ols.model <- global_data %>% 
+  glm(
+    select ~ vulnerability + transmission + income + occupation + age_category,
+    family = gaussian,
+    data=.
+  )
+
+ols.vcovCL <- cluster.vcov(ols.model, global_data[["country"]], df_correction = FALSE)
+ols.res <- coeftest(ols.model, ols.vcovCL) %>% 
+  tidy() %>% 
+  filter(term != "(Intercept)") %>% 
+  results_tidy(.)
+```
+
+Result of OLS
+
+```{r ols-res}
+ols.res %>%
+  kable("html", caption="Result of Linear Regression Model") %>% 
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F) %>%
+  scroll_box(height = "500pt")
+```
+
+
+Plot the result
+
+```{r ols-plot}
+ols.plot <- plot_result(ols.res) +
+  ggtitle("Estimation Result of Linear Regression Model")
+ggsave("./1-figure/res-OLS.png", ols.plot)
+
+ols.plot
+```
+
+
+## Binary Logit Regression Model
+
+```{r bl}
+bl.model <- global_data %>% 
+  glm(
+    select ~ vulnerability + transmission + income + occupation + age_category,
+    family = binomial(link = 'logit'),
+    data = .
+  )
+
+bl.vcovCL <- cluster.vcov(bl.model, global_data[["country"]], df_correction = FALSE)
+bl.res <- coeftest(bl.model, bl.vcovCL) %>% 
+  tidy() %>% 
+  filter(term != "(Intercept)") %>% 
+  results_tidy(.)
+```
+
+Result of binary logit
+
+```{r bl-res}
+bl.res %>%
+  kable("html", caption="Result of Binary Logistic Regression Model") %>% 
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F) %>%
+  scroll_box(height = "500pt")
+```
+
+
+Plot the result
+
+```{r bl-plot}
+bl.plot <- plot_result(bl.res) +
+  ggtitle("Estimation Result of Binary Logit Regression Model")
+
+ggsave("./1-figure/res_bl.png", bl.plot)
+bl.plot
+```
+
+
+### Conditional Logit Model
+
+```{r cl}
+cl.model <- clogit(
+  select ~ vulnerability + transmission + income + occupation + age_category + strata(trial_index),
+  data = global_data
+)
+
+cl.vcovCL <- cluster.vcov(cl.model, global_data[["country"]], df_correction = FALSE)
+cl.res <- coeftest(cl.model, cl.vcovCL) %>% 
+  tidy() %>% 
+  filter(term != "(Intercept)") %>% 
+  results_tidy(.)
+```
+
+
+``` {r cl-res}
+cl_res_df %>% 
+  kable("html", caption="Result of Conditional Logistic Regression Model") %>% 
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F) %>%
+  scroll_box(height = "500pt")
+```
+
+
+```{r cl-plot}
+ggplot(cl_res_df, aes(x=estimate, y=term)) +
+  geom_point(position = position_dodge(width = 0.7)) +
+  geom_errorbarh(
+      aes(xmin = estimate - 1.96*std.error, xmax = estimate + 1.96*std.error),
+      position = position_dodge(width = 0.7),
+      size = 0.5
+    ) +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  theme(strip.text = element_text(face = "bold.italic")) +
+  aes(color = "firebrick2", height = 0.5) +
+  facet_grid(attribute ~ ., space = "free", scales = "free_y",) +
+  labs(x = "Estimate", y = "", color = "") +
+  scale_y_discrete(limits = rev(levels("term"))) +
+  theme(
+    legend.position = "none",
+    text = element_text(size = 12),
+    strip.text = element_text(size = 12),
+    axis.text.y = element_text(size = 12),
+    legend.text = element_text(size = 12)
+  )
+```
+
