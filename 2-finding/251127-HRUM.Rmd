@@ -1,0 +1,293 @@
+---
+title: "Programming HRUM and Compare Models"
+author: "Wei-Lun, Lin"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(kableExtra)
+library(data.table)
+library(Matrix)
+library(microbenchmark)
+library(survival)
+```
+
+
+## Data
+
+First read the data.
+
+```{r import-data}
+global_data <- read_rds("../1-data/2-processed/conjoint_data.rds")
+global_data %>% 
+  head() %>% 
+  kable("html", caption="First 6 Row of CANDOUR Survey") %>% 
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F) %>%
+  scroll_box(height = "500pt")
+```
+
+All the potential profiles:
+
+```{r}
+profiles <- read_rds("../1-data/2-processed/profiles.rds")
+profiles %>% 
+  head() %>% 
+  kable("html", caption="First 6 Row of Potential Profiles") %>% 
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F) %>%
+  scroll_box(height = "500pt")
+```
+
+
+## Heterogeneous Random Utility Model (HRUM)
+
+### Compute Negative Log Likelihood
+
+Here we define a function to compute the negative log-likelihood, score function and hessian for the HRUM.
+
+```{r nll-score-hes}
+HRUM.NLL.grade <- function(beta, exp_data, A) {
+  # beta: vector of profile attributes (P x 1)
+  # exp_data: long-format data frame (including `trial_id`, `profile_id`, `select`)
+  # A: a matrix of all the profiles (K x P)
+
+  # ------------------ 1. Extract the information in the experiment data ----------------------
+  dat <- data.table(exp_data)  # transform data frame to data.table, which accelerate the computation
+  K <- nrow(A)
+
+  # ------------------ 2. Compute alternatives' effects ---------------------------------------
+  # theta_k = theta[profile_id]: 864*1 to n*1  =>  the effect of all the profiles theta
+  dat[, theta_k := (A %*% beta)[dat$profile_id]]  # n * 1 vector
+
+  # ------------------ 3. compute sum of exponential theta by trial ---------------------------
+  dat[, max_theta := max(theta_k), by = trial_id]
+  # dat[, exp_theta_k := exp(theta_k)]  # compute sum of exponential theta_k by trials: sum(exp(theta_k))
+  dat[, exp_theta_k := exp(theta_k - max_theta)]  # compute sum of exponential theta_k by trials: sum(exp(theta_k))
+  dat[, sum_exp_theta_k := sum(exp_theta_k), by = trial_id]  # log likelihood of all participants and all trials
+  # compute probability of choosing alternative k by softmax
+  dat[, p_k := exp_theta_k / sum_exp_theta_k]  # p_k = exp(theta_k) / sum(exp(theta_k))
+
+  # ------------------ 4. Compute each profile's log-likelihood -------------------------------
+  dat[, log_lik := log(p_k)]
+  nll <- -sum(dat$log_lik[dat$select == 1])  # log likelihood of all participants and all trials
+
+  # ------------------ 5. Compute score function of theta S(THeta) (K x 1) --------------------
+  # S_k = sum_j [ 1(y=k) - p_k ]
+  S_theta_total <- dat[, .(S.value = sum(select - p_k)), by = profile_id]  # sum of score grouped by profile
+  S_theta <- rep(0, K)
+  S_theta[S_theta_total$profile_id] <- S_theta_total$S.value
+  
+  # ------------------- 6. Convert score and hessian to beta ---------------------------
+  S_beta <- t(A) %*% S_theta
+  
+  # ------------------- 7. Output the negative log-likelihood, gradient, and hessian --
+  attr(nll, "gradient") <- -S_beta
+  return(nll)
+}
+
+HRUM.NLL.grade.hessian <- function(beta, exp_data, A) {
+  # beta: vector of profile attributes (P x 1)
+  # exp_data: long-format data frame (including `trial_id`, `profile_id`, `select`)
+  # A: a matrix of all the profiles (K x P)
+
+  # ------------------ 1. Extract the information in the experiment data ----------------------
+  dat <- data.table(exp_data)  # transform data frame to data.table, which accelerate the computation
+  K <- nrow(A)
+
+  # ------------------ 2. Compute alternatives' effects ---------------------------------------
+  # theta_k = theta[profile_id]: 864*1 to n*1  =>  the effect of all the profiles theta
+  dat[, theta_k := (A %*% beta)[dat$profile_id]]  # n * 1 vector
+
+  # ------------------ 3. compute sum of exponential theta by trial ---------------------------
+  dat[, max_theta := max(theta_k), by = trial_id]
+  # dat[, exp_theta_k := exp(theta_k)]  # compute sum of exponential theta_k by trials: sum(exp(theta_k))
+  dat[, exp_theta_k := exp(theta_k - max_theta)]  # compute sum of exponential theta_k by trials: sum(exp(theta_k))
+  dat[, sum_exp_theta_k := sum(exp_theta_k), by = trial_id]  # log likelihood of all participants and all trials
+  # compute probability of choosing alternative k by softmax
+  dat[, p_k := exp_theta_k / sum_exp_theta_k]  # p_k = exp(theta_k) / sum(exp(theta_k))
+
+  # ------------------ 4. Compute each profile's log-likelihood -------------------------------
+  dat[, log_lik := log(p_k)]
+  nll <- -sum(dat$log_lik[dat$select == 1])  # log likelihood of all participants and all trials
+
+  # ------------------ 5. Compute score function of theta S(THeta) (K x 1) --------------------
+  # S_k = sum_j [ 1(y=k) - p_k ]
+  S_theta_total <- dat[, .(S.value = sum(select - p_k)), by = profile_id]  # sum of score grouped by profile
+  S_theta <- rep(0, K)
+  S_theta[S_theta_total$profile_id] <- S_theta_total$S.value
+  
+  # -------------- 6. Compute the hessian matrix H(Theta) (K x K) -----------------------------
+  # Data slicing
+  dat.1 <- dat[seq(1, nrow(dat), 2)]
+  dat.2 <- dat[seq(2, nrow(dat), 2)]
+  
+  # diagonal contribution (h_mm = p_k * (p_k - 1))
+  diag_values <- dat$p_k * (dat$p_k - 1)
+  
+  # off-diagonal contribution (h_mn = p_m * p_n)
+  off_diag_values <- dat.1$p_k * dat.2$p_k
+  
+  # combine all the i, j, v vectors
+  i_indices <- c(
+      dat$profile_id,               # diagonal row (k)
+      dat.1$profile_id, dat.2$profile_id # off-diagonal row (k_A, k_B)
+  )
+  j_indices <- c(
+      dat$profile_id,               # diagonal col (k)
+      dat.2$profile_id, dat.1$profile_id # off-diagonal col (k_B, k_A)
+  )
+  v_values <- c(
+      diag_values,                     # 對角線的值 (p_k(p_k-1))
+      off_diag_values,                 # 非對角線的值 (p_A * p_B)
+      off_diag_values                  # 非對角線的對稱值 (p_B * p_A)
+  )
+
+  H_theta_total <- sparseMatrix(
+      i = i_indices,
+      j = j_indices,
+      x = v_values,
+      dims = c(K, K)
+  )
+  
+  # -------------- 7. Convert score and hessian to beta ---------------------------
+  S_beta <- t(A) %*% S_theta
+  H_beta <- as.matrix(H_theta_total %*% A)
+  H_beta <- t(A) %*% H_beta
+  
+  # -------------- 8. Output the negative log-likelihood, gradient, and hessian --
+  attr(nll, "gradient") <- -S_beta
+  attr(nll, "hessian") <- -H_beta
+  return(nll)
+}
+```
+
+With the two function, we can fit HRUM to data.
+
+```{r HRUM-fit, cache=T}
+# initialization
+A <- model.matrix(~ vulnerability + transmission + income + occupation + age_category, profiles)
+init_beta <- rep(1, ncol(A))
+input_dat <- global_data %>% 
+  select(c(select, profile_id, trial_id))
+
+HRUM.res <- nlm(
+  f = HRUM.NLL.grade,
+  p = init_beta, 
+  exp_data = input_dat, 
+  A = A
+)
+print(HRUM.res)
+
+HRUM.res.2 <- nlm(
+  f = HRUM.NLL.grade.hessian,
+  p = init_beta, 
+  hessian = T,
+  exp_data = input_dat, 
+  A = A
+)
+print(HRUM.res.2)
+```
+
+We obtain similar results with the two functions, but the computation time are different.
+So we compare the computation time of the two functions, binary logit and conditional logit.
+
+```{r compare-time, cache=T, warning=F}
+mbm <- microbenchmark(
+  "HRUM" = {
+    res <- nlm(
+      f = HRUM.NLL.grade,
+      p = init_beta, 
+      exp_data = global_data, 
+      A = A
+    )
+  },
+  "HRUM w/ hessian" = {
+    res <- nlm(
+      f = HRUM.NLL.grade.hessian,
+      p = init_beta,
+      hessian = T,
+      exp_data = global_data, 
+      A = A
+    )
+  },
+  "Binary logit" = {
+    res <- glm(
+      select ~ vulnerability + transmission + income + occupation + age_category,
+      family = binomial(link = 'logit'),
+      data = global_data
+    )
+  },
+  "Conditional logit" = {
+    res <- clogit(
+      select ~ vulnerability + transmission + income + occupation + age_category + strata(trial_id),
+      data = global_data
+    )
+  },
+  times = 10L
+)
+```
+
+
+
+
+```{r}
+mbm %>% 
+  summary() %>% 
+  as.data.frame() %>% 
+  rename(
+    "model" = expr,
+    "1st-quantle" = lq,
+    "3rd-quantle" = uq
+  ) %>% 
+  kable("html", caption="Comparison Between Models") %>% 
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F) %>%
+  scroll_box(height = "500pt") %>% 
+  footnote("Unit: milliseconds.")
+```
+
+
+```{r mbm-plot, warning=F}
+autoplot(mbm)
+```
+
+As we can see in the plot, the binary logit model has the least computation time, the computation time of conditional logit and HRUM looks similar, and calculating hessian matrix costs lots of time.
+
+<!-- Next, we combine the input formula and the function. -->
+
+```{r HRUM, include=F, echo=F}
+HRUM <- function(formula, data, profiles) {
+  A <- model.matrix(formula, profiles)
+  init_beta <- rep(0, ncol(A))
+  data <- data %>% 
+    select(c(select, profile_id, trial_id))
+  
+  res <- nlm(
+    f = HRUM.NLL.grade, 
+    p = init_beta,
+    hessian = T,
+    exp_data = data,
+    A = A
+  )
+  
+  coef <- res$estimate
+  inv_neg_hessian <- solve(res$hessian)
+  se <- sqrt(diag(inv_neg_hessian))
+  names(coef) <- colnames(A)
+  names(se) <- colnames(A)
+  
+  output <- list(
+    converge = res$code,
+    loglikelihood = -res$minimum,
+    gradient = res$gradient,
+    hessian = res$hessian,
+    estimate = coef,
+    std.error = se
+  )
+  return(output)
+}
+```
+
+
