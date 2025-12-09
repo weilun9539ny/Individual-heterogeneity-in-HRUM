@@ -28,7 +28,7 @@ library(multiwayvcov)
 First read the data.
 
 ```{r import-data}
-global_data <- read_rds("../1-data/2-processed/conjoint_data.rds")
+global_data <- read_rds("../1-data/2-processed/CANDOUR_data.rds")
 global_data %>% 
   head() %>% 
   kable("html", caption="First 6 Row of CANDOUR Survey") %>% 
@@ -94,7 +94,7 @@ Plot the result of OLS.
 ```{r ols-plot}
 ols.plot <- plot_result(ols.res) +
   ggtitle("Estimation Result of Linear Regression Model")
-# ggsave("./1-figure/res-OLS.png", ols.plot)
+# ggsave("./1-figure/res-CANDOUR-OLS.png", ols.plot)
 
 ols.plot
 ```
@@ -143,7 +143,7 @@ Plot the result of BL.
 bl.plot <- plot_result(bl.res) +
   ggtitle("Estimation Result of Binary Logit Regression Model")
 
-ggsave("./1-figure/res-BL.png", bl.plot)
+# ggsave("./1-figure/res-CANDOUR-BL.png", bl.plot)
 bl.plot
 ```
 
@@ -187,7 +187,7 @@ cl.res %>%
 cl.plot <- plot_result(cl.res) +
   ggtitle("Estimation Result of Conditional Logit Regression Model")
 
-# ggsave("./1-figure/res-CL.png", cl.plot)
+# ggsave("./1-figure/res-CANDOUR-CL.png", cl.plot)
 cl.plot
 ```
 
@@ -224,7 +224,7 @@ est.all %>%
       axis.text.y = element_text(size = 12),
       legend.text = element_text(size = 12)
     )
-ggsave("./1-figure/res-BL_CL.png")
+ggsave("./1-figure/res-CANDOUR-BL+CL.png")
 ```
 
 

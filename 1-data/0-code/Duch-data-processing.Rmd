@@ -6,7 +6,7 @@ output: html_document
 ---
 
 ```{r}
-dat <- read_rds("../2-processed/nbh_clean_conjoint_global.rds")
+dat <- read_rds("../1-raw/nbh_clean_conjoint_global.rds")
 ```
 
 ## Potential Profiles
@@ -34,7 +34,7 @@ str(profiles)
 save the profiles
 
 ```{r}
-write_rds(profiles, "../2-processed/profiles.rds")
+write_rds(profiles, "../2-processed/CANDOUR_profiles.rds")
 ```
 
 
@@ -56,6 +56,6 @@ head(dat)
 save the edited global data
 
 ```{r}
-write_rds(dat, "../2-processed/conjoint_data.rds")
+write_rds(dat, "../2-processed/CANDOUR_data.rds")
 ```
 
