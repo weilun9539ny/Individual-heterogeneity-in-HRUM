@@ -1,0 +1,262 @@
+---
+title: "Hainmueller et al. (2014) Data Preprocessing"
+author: "Wei-Lun, Lin"
+# date: "`r Sys.Date()`"
+output: 
+  html_document:
+    code_folding: hide
+    toc: true
+    toc_float: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(foreign)
+library(tidyverse)  # data processing
+library(kableExtra)  # print table
+# library(survival)
+```
+
+-   背景: 對 Hainmueller et al., (2014) 提到的 candidate experiment 和 immigration experiment 資料進行整理，方便後續分析作業。
+-   結果: 成功完成資料整理。
+-   未來工作: 以 AMCE, logistic regression 和 conditional logistic regression 分析這兩筆資料。
+
+## Candidate Experiment
+
+### Read Candidate Data
+
+```{r read-candidate}
+candidate <- read.dta("../1-raw/candidate.dta")
+candidate %>% 
+  head %>% 
+  kable("html", caption="First 6 Row of Candidate Experiment Data") %>% 
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F)
+```
+
+
+```{r candidate-summary}
+summary(candidate)
+```
+
+
+### Candidate Profiles
+
+在 candidate experiment 中，candidate 有8個 attributes:
+
+| Attribute | Level 1 | Level 2 | Level 3 | Level 4 | Level 5 | Level 6 |
+|-----------|--------|---------------|--------|--------|-------------|-------------|
+| religion | Catholic | Evangelical Protestant | Mainline Protestant | Mormon | Jewish | None |
+| college education | no college | state university | community college | Baptist college | Ivy League college | small college |
+| profession | lawyer | high school teacher | business owner | farmer | doctor | car dealer |
+| annual income | \$32K | \$54K | \$65K | \$92K | \$210K | \$5.1M |
+| racial/ethnic background | Hispanic | White | Caucasian | Black | Asian American | Native American |
+| age | 36 | 45 | 52 | 60 | 68 | 70 |
+| military service | served | not served | \- | \- | \- | \- |
+| gender | male | female | \- | \- | \- | \- |
+
+因此，總共可以得到 $6^6\times2^2=186624$ 種 potential profiles。
+我們可以根據這些 attribute 列出所有的 potential profiles。
+
+```{r candidate-profiles}
+profiles.candidate <- expand.grid(
+  "Military Service" = names(attr(candidate, "label.table")[[2]]),
+  Religion = names(attr(candidate, "label.table")[[5]]),
+  College = names(attr(candidate, "label.table")[[6]]),
+  Profession = names(attr(candidate, "label.table")[[7]]),
+  Income = names(attr(candidate, "label.table")[[8]]),
+  "Race/Ethnicity" = names(attr(candidate, "label.table")[[9]]),
+  Age = names(attr(candidate, "label.table")[[3]]),
+  Gender = names(attr(candidate, "label.table")[[4]])
+) %>% 
+  mutate(profile_id = 1:nrow(.), .before=1)
+
+str(profiles.candidate)
+```
+
+```{r show-candidate-profiles}
+profiles.candidate %>% 
+  head %>% 
+  kable("html", caption="First 6 Row of Candidate Experiment Potential Profiles") %>% 
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F)
+```
+
+
+### Candidate Data Cleaning
+
+檢視資料中是否有缺失值。
+
+```{r candidate-cleaning}
+candidate %>% 
+  summarise(across(everything(), ~ sum(is.na(.)))) %>% 
+  kable("html", caption="Number of NAs in Candidate Experiment Data") %>% 
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F)
+```
+
+僅在 rating 的部分有缺失值。不過由於此階段只先分析受試者在兩個 profiles 之間的選擇，而這部分的資料並無缺失，所以保留所有資料。
+
+接下來調整資料格式，方便後續進行分析。
+
+```{r candidate-structure}
+colname.candidate <- colnames(candidate)[1:10]
+names(colname.candidate) <- c("subject", attr(candidate, "var.labels")[2:9], "select")
+candidate.dat <- candidate %>% 
+  rename(any_of(colname.candidate)) %>% 
+  # rename(select = selected) %>% 
+  left_join(profiles.candidate, colnames(profiles.candidate)[-1]) %>% 
+  mutate(trial_id = ceiling(row_number() / 2))
+
+candidate.dat %>% 
+  head %>% 
+  kable("html", caption="First 6 Row of Candidate Experiment Potential Profiles") %>% 
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F)
+```
+
+
+### Save Candidate Data
+
+已完成 candidate experiment 的資料前處理，可儲存該資料。
+
+```{r candidate-save-data}
+write_rds(candidate.dat, "../2-processed/candidate_data.rds")
+write_rds(profiles.candidate, "../2-processed/candidate_profiles.rds")
+```
+
+
+## Immigrant Experiment
+
+### Read Immigrant Data
+
+```{r read-immigrant}
+immigrant <- read.dta("../1-raw/immigrant.dta")
+immigrant %>% 
+  head %>% 
+  kable("html", caption="First 6 Row of Immigrant Experiment Data") %>% 
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F) %>%
+  scroll_box(height = "500pt")
+```
+
+
+```{r immigrant-summary}
+summary(immigrant)
+```
+
+
+### Immigrant Profiles
+
+在 immigrant experiment 中，immigrant 有9個 attributes:
+
+| Attribute | Level 1 | Level 2 | Level 3 | Level 4 | Level 5 | Level 6 |  Level 7 |  Level 8 |  Level 9 |  Level 10 |  Level 11 |
+|-----------|--------|---------------|--------|--------|-------------|-------------|--------|--------|--------|--------|---------|
+| Education (7) | No formal education | Equivalent to completing fourth grade in the US | Equivalent to completing eighth grade in the US | Equivalent to completing high school in the US | Equivalent to completing two years of college in the US | Equivalent to completing a college degree in the US | Equivalent to completing a graduate degree in the US | \- | \- | \- | \- |
+| Gender (2) | female | male | \- | \- | \- | \- | \- | \- | \- | \- | \- |
+| Origin (10) | Germany | France | Mexico | Philippines | Poland | India | China | Sudan | Somalia | Iraq | \- |
+| Application Reason (3) | Reunite with family members already in the U.S. | Seek better job in U.S. | Escape political/religious persecution | \- | \- | \- | \- | \- | \- | \- | \- |
+| Profession (11) | Janitor | Waiter | Child care provider | Gardener | Financial analyst | Construction worker | Teacher | Computer programmer | Nurse | Research scientist | Doctor |
+| Job experience (4) | No job training or prior experience | One or two years of job training and experience | Three to five years of job training and experience | More than five years of job training and experience | \- | \- | \- | \- | \- | \- | \- |
+| Job plans (4) | Has a contract with a U.S. employer | Does not have a contract with a U.S. employer but has done job interviews | Will look for work after arriving in the U.S. | Has no plans to look for work at this time | \- | \- | \- | \- | \- | \- | \- |
+| Prior trips to US (5) | Never been to the U.S. | Entered U.S. once before on a tourist visa | Has visited the U.S. many times before on tourist visas | Spent six months with family members in the U.S | Entered the U.S. once before without legal authorization | \- | \- | \- | \- | \- | \- |
+| Language (4) | During the admission interview, this applicant spoke fluent English | During admission interview, this applicant spoke broken English | During admission interview, this applicant tried to speak English but was unable | During admission interview, this applicant spoke [language] and used an interpreter | \- | \- | \- | \- | \- | \- | \- |
+
+理論上，總共可以得到 $7\times2\times10\times3\times11\times4\times4\times5\times4=1478400$ 種 potential profiles，
+但是在隨機生成 profile 的機制上有限制，使得：
+
+-   `Profession` 為 doctor, research scientist, computer programmer, and financial analyst 者，在 `Education` 上必須為 Equivalent to completing two years of college in the US, Equivalent to completing a college degree in the US 或者 Equivalent to completing a graduate degree in the US
+-   `Application Reason` 為 Escape political/religious persecution 者，`Origin` 必須為 Iraq, Sudan, Somalia 或 China (論文中未提及)
+
+在第二個條件中，僅提到申請理由為逃離迫害者，必須來自伊拉克、蘇丹或索馬利亞，但實驗資料中有 494 個 profiles 為逃離中國，
+並且生成該類 profile 數量的期望值為 $13960\times1/30=465.3333$。\\
+由於不確定是資料中 `Origin` 的 coding 錯誤，還是生成實驗程序的過程就如此設定，需要做檢定來檢驗這樣的資料數量是否符合隨機生成的比例。
+
+```{r immigrant-check-condition}
+n.flee.from.China <- immigrant %>% 
+  filter(FeatReason == "Escape political/religious persecution", FeatCountry == "China") %>% 
+  nrow()
+cat("Numbers of profiles that involving escape from China:", n.flee.from.China, "\n")
+binom.test(n.flee.from.China, nrow(immigrant), 1/30, "t")
+```
+
+結果顯示可以相信 494 的數量符合隨機生成的機率，因此應為文獻中誤植。
+
+根據條件計算 profiles 數量：
+
+-   違反第一個條件的 profiles 共有 $4(\text{Profession})\times(7-3)(\text{Education})\times19200=307200$ 種
+-   違反第二個條件的 profiles 共有 $1(\text{Application Reason})\times(10-4)(\text{Origin})\times49280=295680$ 種
+-   同時違反兩個條件的 profiles 共有 $4(\text{Profession})\times(7-3)(\text{Education})\times1(\text{Application Reason})\times(10-4)(\text{Origin})\times640=61440$ 種
+-   應保留的 profiles 共有 $1478400 - 307200 - 295680 + 61440 = 936960$ 種
+
+根據這些 attribute 以及對應的條件，我們可以列出所有的 potential profiles。
+
+```{r immigrant-profiles}
+highly_skilled_job <- c("Doctor",  "Research scientist", "Computer programmer", "Financial analyst")
+have_college_education <- c("Equivalent to completing two years of college in the US", "Equivalent to completing a college degree in the US", "Equivalent to completing a graduate degree in the US")
+danger_country <- c("Iraq", "Sudan", "Somalia", "China")
+
+profiles.immigrant <- expand.grid(
+  Education = names(attr(immigrant, "label.table")[[4]]),
+  Gender = names(attr(immigrant, "label.table")[[3]]),
+  Origin = names(attr(immigrant, "label.table")[[10]]),
+  "Application Reason" = names(attr(immigrant, "label.table")[[5]]),
+  Profession = names(attr(immigrant, "label.table")[[9]]),
+  "Job experience" = names(attr(immigrant, "label.table")[[6]]),
+  "Job plans" = names(attr(immigrant, "label.table")[[7]]),
+  "Prior trips to US" = names(attr(immigrant, "label.table")[[2]]),
+  Language = names(attr(immigrant, "label.table")[[8]])
+) %>% 
+  mutate(profile_id = 1:nrow(.), .before=1) %>% 
+  filter(
+    (!Profession %in% highly_skilled_job) | (Education %in% have_college_education),
+    (`Application Reason` != "Escape political/religious persecution") | (Origin %in% danger_country)
+  )
+
+str(profiles.immigrant)
+```
+
+```{r show-immigrant-profiles}
+profiles.immigrant %>% 
+  head %>% 
+  kable("html", caption="First 6 Row of Immigrant Experiment Potential Profiles") %>% 
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F)
+```
+
+
+### Immigrant Data Cleaning
+
+檢視資料中是否有缺失值。
+
+```{r immigrant-cleaning}
+immigrant %>% 
+  summarise(across(everything(), ~ sum(is.na(.)))) %>% 
+  kable("html", caption="Number of NAs in Immigrant Experiment Data") %>% 
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F) %>% 
+  scroll_box(width = "100%")
+```
+
+此筆資料在受試者於兩個 profiles 之間的選擇並無缺失，所以保留所有資料。
+
+接下來調整資料格式，方便後續進行分析。
+
+```{r immigrant-structure}
+colname.immigrant <- colnames(immigrant)[1:12]
+names(colname.immigrant) <- c("subject", "subject_trial_id", attr(immigrant, "var.labels")[3:11], "select")
+immigrant.dat <- immigrant %>% 
+  rename(any_of(colname.immigrant)) %>% 
+  left_join(profiles.immigrant, colnames(profiles.immigrant)[-1]) %>% 
+  mutate(trial_id = ceiling(row_number() / 2))
+
+immigrant.dat %>% 
+  head %>% 
+  kable("html", caption="First 6 Row of Immigrant Experiment Potential Profiles") %>% 
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F) %>% 
+  scroll_box(width = "100%", height="500pt")
+```
+
+
+### Save Immigrant Data
+
+已完成 immigrant experiment 的資料前處理，可儲存該資料。
+
+```{r immigrant-save-data}
+write_rds(immigrant.dat, "../2-processed/immigrant_data.rds")
+write_rds(profiles.immigrant, "../2-processed/immigrant_profiles.rds")
+```
