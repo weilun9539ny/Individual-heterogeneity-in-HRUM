@@ -1,0 +1,323 @@
+---
+title: "Analysis Candidate Experiment Data with AMCE, Logit Model and Conditional Logit Model"
+author: "Wei-Lun, Lin"
+# date: "`r Sys.Date()`"
+output: 
+  html_document:
+    code_folding: hide
+    toc: true
+    toc_float: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)  # data processing
+library(broom)
+library(kableExtra)  # print table
+library(survival)
+
+library(sandwich)
+library(lmtest)
+library(multiwayvcov)
+
+source("./0-code/functions.R")
+```
+
+-   背景: 以 OLS, logistic regression, conditional logistic regression 分析 Hainmueller et al. (2014) 的 candidate experiment 資料。
+-   結果: 的確可以得到相同的 AMCE，不過也發現在對每個受試者控制 cluster-robust standard error 後，logistic regression 所得到的 standard error 會和 conditional logistic regression 相差不大。
+-   未來工作: 後續分析 immigrant experiment。
+
+
+## Candidate Experiment
+
+```{r import-data-candidate}
+candidate <- read_rds("../1-data/2-processed/candidate_data.rds")
+candidate %>% 
+  head() %>% 
+  kable("html", caption="First 6 Row of Candidate Data") %>% 
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F) %>% 
+  scroll_box(width = "100%")
+```
+
+在 candidate experiment 中，candidate 有8個 attributes:
+
+| Attribute | Level 1 | Level 2 | Level 3 | Level 4 | Level 5 | Level 6 |
+|-----------|--------|---------------|--------|--------|-------------|-------------|
+| Religion (6) | Catholic | Evangelical Protestant | Mainline Protestant | Mormon | Jewish | None |
+| College education (6) | no college | state university | community college | Baptist college | Ivy League college | small college |
+| Profession (6) | lawyer | high school teacher | business owner | farmer | doctor | car dealer |
+| Annual income (6) | \$32K | \$54K | \$65K | \$92K | \$210K | \$5.1M |
+| Racial/ethnic background (6) | Hispanic | White | Caucasian | Black | Asian American | Native American |
+| Age (6) | 36 | 45 | 52 | 60 | 68 | 70 |
+| Military service (6) | served | not served | \- | \- | \- | \- |
+| Gender (6) | male | female | \- | \- | \- | \- |
+
+
+## Model Fitting
+
+```{r candidate-res-all}
+est.all.candidate <- data.frame()
+```
+
+
+### Candidate: Linear Regression
+
+```{r candidate-ols}
+ols.model <- glm(
+  select ~ `Military Service` + Religion + College + Profession + Income + `Race/Ethnicity` + Age + Gender,
+  family = gaussian,
+  data = candidate
+)
+ols.vcovCL <- cluster.vcov(ols.model, candidate$subject, df_correction = F)
+ols.candidate <- coeftest(ols.model, ols.vcovCL) %>% 
+  tidy() %>% 
+  filter(term != "(Intercept)")
+
+est.all.candidate <- ols.candidate %>% 
+  select(-c(statistic, p.value)) %>% 
+  mutate(
+    CI.lower = estimate - 1.96*std.error,
+    CI.upper = estimate + 1.96*std.error
+  ) %>% 
+  rename_with(~ paste0(.x, ".OLS"), .cols = -c(term))
+```
+
+Result of OLS.
+
+```{r ols-res}
+ols.candidate %>%
+  mutate_if(is.numeric, ~ round(.x, 3)) %>% 
+  kable("html", caption="Result of Linear Regression Model for Candidate Experiment") %>% 
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F) %>%
+  scroll_box(height = "500pt")
+```
+
+
+Plot the result of OLS.
+
+```{r ols-plot, warning=F, message=F}
+ols.plot.candidate <- ols.candidate %>% 
+  mutate(term = factor(term, levels = rev(term))) %>% 
+  ggplot(aes(x = estimate, y = term)) +
+  geom_point(
+    position = position_dodge(width = 0.7),
+    alpha = .7
+  ) +
+  geom_errorbar(
+    aes(
+      xmin = estimate - 1.96*std.error,
+      xmax = estimate + 1.96*std.error
+    ),
+    position = position_dodge(width = 0.7),
+    linewidth = 0.5, alpha = .7
+  ) +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  theme(strip.text = element_text(face = "bold.italic")) +
+  # facet_grid(attribute ~ ., space = "free", scales = "free_y",) +
+  labs(
+    x = "AMCE", y = "", color = "", title = "Candidate Experiment: OLS"
+  ) +
+  # scale_y_discrete(limits = rev(levels("term"))) +
+  theme(
+    legend.position = "none",
+    text = element_text(size = 12),
+    strip.text = element_text(size = 12),
+    axis.text.y = element_text(size = 12),
+    legend.text = element_text(size = 12)
+  ) +
+  theme_light()
+  
+ggsave("./1-figure/res-candidate-OLS.png", ols.plot.candidate)
+
+ols.plot.candidate
+```
+
+
+### Logistic Regression
+
+```{r bl}
+bl.model <- glm(
+    select ~ `Military Service` + Religion + College + Profession + Income + `Race/Ethnicity` + Age + Gender,
+    family = binomial(link = 'logit'),
+    data = candidate
+  )
+
+bl.vcovCL <- cluster.vcov(bl.model, candidate$subject, df_correction = FALSE)
+bl.candidate <- coeftest(bl.model, bl.vcovCL) %>%
+# bl.candidate <- bl.model %>% 
+  tidy() %>% 
+  filter(term != "(Intercept)")
+
+est.all.candidate <- bl.candidate %>% 
+  select(-c(statistic, p.value)) %>% 
+  mutate(
+    CI.lower = estimate - 1.96*std.error,
+    CI.upper = estimate + 1.96*std.error
+  ) %>% 
+  rename_with(~ paste0(.x, ".BL"), .cols = -c(term)) %>% 
+  left_join(est.all.candidate, ., by = join_by(term))
+```
+
+Result of logit model.
+
+```{r bl-res}
+bl.candidate %>%
+  mutate_if(is.numeric, ~ round(.x, 3)) %>% 
+  kable("html", caption="Result of Logit Regression Model for Candidate Experiment") %>% 
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F) %>%
+  scroll_box(height = "500pt")
+```
+
+
+Plot the result of logistic regression.
+
+```{r bl-plot, warning=F, message=F}
+bl.plot.candidate <- bl.candidate %>% 
+  mutate(term = factor(term, levels = rev(term))) %>% 
+  ggplot(aes(x = estimate, y = term)) +
+  geom_point(
+    position = position_dodge(width = 0.7),
+    alpha = .7
+  ) +
+  geom_errorbar(
+    aes(
+      xmin = estimate - 1.96*std.error,
+      xmax = estimate + 1.96*std.error
+    ),
+    position = position_dodge(width = 0.7),
+    linewidth = 0.5, alpha = .7
+  ) +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  theme(strip.text = element_text(face = "bold.italic")) +
+  # facet_grid(attribute ~ ., space = "free", scales = "free_y",) +
+  labs(
+    x = "Effect Estimation", y = "", color = "", title = "Candidate Experiment: Logistic Regression"
+  ) +
+  # scale_y_discrete(limits = rev(levels("term"))) +
+  theme(
+    legend.position = "none",
+    text = element_text(size = 12),
+    strip.text = element_text(size = 12),
+    axis.text.y = element_text(size = 12),
+    legend.text = element_text(size = 12)
+  ) +
+  theme_light()
+
+ggsave("./1-figure/res-candidate-BL.png", bl.plot.candidate)
+bl.plot.candidate
+```
+
+
+### Conditional Logistic Regression
+
+```{r cl}
+cl.model <- clogit(
+  select ~ `Military Service` + Religion + College + Profession + Income + `Race/Ethnicity` + Age + Gender + strata(trial_id),
+  data = candidate
+)
+
+# cl.vcovCL <- cluster.vcov(cl.model, global_data[["country"]], df_correction = FALSE)
+# cl.res <- coeftest(cl.model, cl.vcovCL) %>% 
+cl.candidate <- cl.model %>% 
+  tidy() %>% 
+  filter(term != "(Intercept)")
+
+est.all.candidate <- cl.candidate %>% 
+  select(-c(statistic, p.value)) %>% 
+  mutate(
+    CI.lower = estimate - 1.96*std.error,
+    CI.upper = estimate + 1.96*std.error
+  ) %>% 
+  rename_with(~ paste0(.x, ".CL"), .cols = -c(term)) %>% 
+  left_join(est.all.candidate, ., by = join_by(term))
+```
+
+
+``` {r cl-res}
+cl.candidate %>% 
+  mutate_if(is.numeric, ~ round(.x, 3)) %>% 
+  kable("html", caption="Result of Conditional Logistic Regression") %>% 
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F) %>%
+  scroll_box(height = "500pt")
+```
+
+
+```{r cl-plot, message=F}
+cl.plot.candidate <- cl.candidate %>% 
+  mutate(term = factor(term, levels = rev(term))) %>% 
+  ggplot(aes(x = estimate, y = term)) +
+  geom_point(
+    position = position_dodge(width = 0.7),
+    alpha = .7
+  ) +
+  geom_errorbar(
+    aes(
+      xmin = estimate - 1.96*std.error,
+      xmax = estimate + 1.96*std.error
+    ),
+    position = position_dodge(width = 0.7),
+    linewidth = 0.5, alpha = .7
+  ) +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  theme(strip.text = element_text(face = "bold.italic")) +
+  # facet_grid(attribute ~ ., space = "free", scales = "free_y",) +
+  labs(
+    x = "Effect Estimation", y = "", color = "", title = "Candidate Experiment: Conditional Logistic"
+  ) +
+  # scale_y_discrete(limits = rev(levels("term"))) +
+  theme(
+    legend.position = "none",
+    text = element_text(size = 12),
+    strip.text = element_text(size = 12),
+    axis.text.y = element_text(size = 12),
+    legend.text = element_text(size = 12)
+  ) +
+  theme_light()
+
+# ggsave("./1-figure/res-candidate-CL.png", cl.plot.candidate)
+cl.plot.candidate
+```
+
+
+## Result Comparison
+
+### Logistic and Conditional Logistic Regression
+
+```{r plot-all}
+est.all.candidate %>% 
+  select(-ends_with("OLS")) %>% 
+  mutate(term = factor(term, levels = rev(term))) %>% 
+  pivot_longer(
+    cols = -term,
+    names_to = c(".value", "model"),
+    names_pattern = "(.*)\\.(OLS|BL|CL)$"
+  ) %>%  
+  mutate(
+    model = fct_recode(model, "Logistic" = "BL", "Conditional logistic" = "CL")
+  ) %>% 
+  ggplot(aes(x=estimate, y=term, col=model)) +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  geom_point(alpha=.7) +
+  geom_errorbar(
+    aes(xmin = CI.lower, xmax = CI.upper), 
+    alpha=.7, linewidth=.5
+  ) +
+  # facet_grid(attribute ~ ., space = "free", scales = "free_y") +
+  labs(
+    x = "Effect estimate", y="", col="Model",
+    title = "Candidate Experiment: Comparison Between Logistic and Conditional Logistic"
+  )+
+  theme_light() +
+  theme(
+      legend.position = "bottom",
+      text = element_text(size = 12),
+      strip.text = element_text(size = 12),
+      axis.text.y = element_text(size = 8),
+      legend.text = element_text(size = 12),
+      plot.title.position = "plot"
+    )
+ggsave("./1-figure/res-candidate-BL+CL.png")
+```
+
+
