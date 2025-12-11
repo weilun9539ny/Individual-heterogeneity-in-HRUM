@@ -15,12 +15,19 @@ knitr::opts_chunk$set(echo = TRUE)
 library(foreign)
 library(tidyverse)  # data processing
 library(kableExtra)  # print table
-# library(survival)
+library(tools)
 ```
 
 -   背景: 對 Hainmueller et al., (2014) 提到的 candidate experiment 和 immigration experiment 資料進行整理，方便後續分析作業。
 -   結果: 成功完成資料整理。
 -   未來工作: 以 AMCE, logistic regression 和 conditional logistic regression 分析這兩筆資料。
+
+## Data Description
+
+資料來自 [Hainmueller et al. (2014)](https://doi.org/10.1093/pan/mpt024) 的研究，
+且有[公開資料](https://dataverse.harvard.edu/dataset.xhtml?persistentId=doi:10.7910/DVN/THJYQR)。
+此研究共有 candidate experiment 和 immigrant experiment 兩種實驗和對應的資料。
+
 
 ## Candidate Experiment
 
@@ -101,10 +108,12 @@ candidate %>%
 colname.candidate <- colnames(candidate)[1:10]
 names(colname.candidate) <- c("subject", attr(candidate, "var.labels")[2:9], "select")
 candidate.dat <- candidate %>% 
-  rename(any_of(colname.candidate)) %>% 
-  # rename(select = selected) %>% 
+  rename(any_of(colname.candidate)) %>%  # Name the attribute codings
   left_join(profiles.candidate, colnames(profiles.candidate)[-1]) %>% 
-  mutate(trial_id = ceiling(row_number() / 2))
+  mutate(trial_id = ceiling(row_number() / 2)) %>% 
+  rename_with(~ gsub("([ /])", "", .x)) %>%  # make the column name camel cases
+  rename_with(~ paste0(.x, "."), .cols=2:9) %>%   # make attribute names end with "."
+  relocate(c(trial_id, profile_id, select), .after = 1)  # let trial_id and profile_id be top columns
 
 candidate.dat %>% 
   head %>% 
@@ -242,7 +251,13 @@ names(colname.immigrant) <- c("subject", "subject_trial_id", attr(immigrant, "va
 immigrant.dat <- immigrant %>% 
   rename(any_of(colname.immigrant)) %>% 
   left_join(profiles.immigrant, colnames(profiles.immigrant)[-1]) %>% 
-  mutate(trial_id = ceiling(row_number() / 2))
+  mutate(
+    trial_id = ceiling(row_number() / 2),
+    select = (select == "Yes") * 1
+  ) %>% 
+  rename_with(~ gsub("([ /])", "", toTitleCase(.x)), .cols=3:11) %>%  # make the column name camel cases
+  rename_with(~ paste0(.x, "."), .cols=3:11) %>%   # make attribute names end with "."
+  relocate(c(trial_id, profile_id, select), .after = 1)  # let trial_id and profile_id be top columns
 
 immigrant.dat %>% 
   head %>% 

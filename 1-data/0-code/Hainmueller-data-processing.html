@@ -1804,6 +1804,13 @@ immigration experiment 資料進行整理，方便後續分析作業。</li>
 <li>未來工作: 以 AMCE, logistic regression 和 conditional logistic
 regression 分析這兩筆資料。</li>
 </ul>
+<div id="data-description" class="section level2">
+<h2>Data Description</h2>
+<p>資料來自 <a href="https://doi.org/10.1093/pan/mpt024">Hainmueller et
+al. (2014)</a> 的研究， 且有<a href="https://dataverse.harvard.edu/dataset.xhtml?persistentId=doi:10.7910/DVN/THJYQR">公開資料</a>。
+此研究共有 candidate experiment 和 immigrant experiment
+兩種實驗和對應的資料。</p>
+</div>
 <div id="candidate-experiment" class="section level2">
 <h2>Candidate Experiment</h2>
 <div id="read-candidate-data" class="section level3">
@@ -2539,10 +2546,12 @@ profiles 之間的選擇，而這部分的資料並無缺失，所以保留所�
 <pre class="r"><code>colname.candidate &lt;- colnames(candidate)[1:10]
 names(colname.candidate) &lt;- c(&quot;subject&quot;, attr(candidate, &quot;var.labels&quot;)[2:9], &quot;select&quot;)
 candidate.dat &lt;- candidate %&gt;% 
-  rename(any_of(colname.candidate)) %&gt;% 
-  # rename(select = selected) %&gt;% 
+  rename(any_of(colname.candidate)) %&gt;%  # Name the attribute codings
   left_join(profiles.candidate, colnames(profiles.candidate)[-1]) %&gt;% 
-  mutate(trial_id = ceiling(row_number() / 2))
+  mutate(trial_id = ceiling(row_number() / 2)) %&gt;% 
+  rename_with(~ gsub(&quot;([ /])&quot;, &quot;&quot;, .x)) %&gt;%  # make the column name camel cases
+  rename_with(~ paste0(.x, &quot;.&quot;), .cols=2:9) %&gt;%   # make attribute names end with &quot;.&quot;
+  relocate(c(trial_id, profile_id, select), .after = 1)  # let trial_id and profile_id be top columns
 
 candidate.dat %&gt;% 
   head %&gt;% 
@@ -2557,41 +2566,41 @@ First 6 Row of Candidate Experiment Potential Profiles
 <th style="text-align:left;">
 subject
 </th>
-<th style="text-align:left;">
-Military Service
-</th>
-<th style="text-align:left;">
-Religion
-</th>
-<th style="text-align:left;">
-College
-</th>
-<th style="text-align:left;">
-Profession
-</th>
-<th style="text-align:left;">
-Income
-</th>
-<th style="text-align:left;">
-Race/Ethnicity
-</th>
-<th style="text-align:left;">
-Age
-</th>
-<th style="text-align:left;">
-Gender
-</th>
 <th style="text-align:right;">
-select
-</th>
-<th style="text-align:right;">
-rating
+trial_id
 </th>
 <th style="text-align:right;">
 profile_id
 </th>
 <th style="text-align:right;">
-trial_id
+select
+</th>
+<th style="text-align:left;">
+MilitaryService.
+</th>
+<th style="text-align:left;">
+Religion.
+</th>
+<th style="text-align:left;">
+College.
+</th>
+<th style="text-align:left;">
+Profession.
+</th>
+<th style="text-align:left;">
+Income.
+</th>
+<th style="text-align:left;">
+RaceEthnicity.
+</th>
+<th style="text-align:left;">
+Age.
+</th>
+<th style="text-align:left;">
+Gender.
+</th>
+<th style="text-align:right;">
+rating
 </th>
 </tr>
 </thead>
@@ -2599,6 +2608,15 @@ trial_id
 <tr>
 <td style="text-align:left;">
 A2NEN4NSNS2O8S
+</td>
+<td style="text-align:right;">
+1
+</td>
+<td style="text-align:right;">
+173627
+</td>
+<td style="text-align:right;">
+0
 </td>
 <td style="text-align:left;">
 Did Not Serve
@@ -2625,21 +2643,21 @@ White
 Female
 </td>
 <td style="text-align:right;">
-0
-</td>
-<td style="text-align:right;">
 0.3333333
-</td>
-<td style="text-align:right;">
-173627
-</td>
-<td style="text-align:right;">
-1
 </td>
 </tr>
 <tr>
 <td style="text-align:left;">
 A2NEN4NSNS2O8S
+</td>
+<td style="text-align:right;">
+1
+</td>
+<td style="text-align:right;">
+60698
+</td>
+<td style="text-align:right;">
+1
 </td>
 <td style="text-align:left;">
 Served
@@ -2666,21 +2684,21 @@ Asian American
 Male
 </td>
 <td style="text-align:right;">
-1
-</td>
-<td style="text-align:right;">
 0.5000000
-</td>
-<td style="text-align:right;">
-60698
-</td>
-<td style="text-align:right;">
-1
 </td>
 </tr>
 <tr>
 <td style="text-align:left;">
 A2NEN4NSNS2O8S
+</td>
+<td style="text-align:right;">
+2
+</td>
+<td style="text-align:right;">
+158453
+</td>
+<td style="text-align:right;">
+1
 </td>
 <td style="text-align:left;">
 Did Not Serve
@@ -2707,21 +2725,21 @@ Native American
 Female
 </td>
 <td style="text-align:right;">
-1
-</td>
-<td style="text-align:right;">
 0.6666667
-</td>
-<td style="text-align:right;">
-158453
-</td>
-<td style="text-align:right;">
-2
 </td>
 </tr>
 <tr>
 <td style="text-align:left;">
 A2NEN4NSNS2O8S
+</td>
+<td style="text-align:right;">
+2
+</td>
+<td style="text-align:right;">
+78392
+</td>
+<td style="text-align:right;">
+0
 </td>
 <td style="text-align:left;">
 Served
@@ -2748,21 +2766,21 @@ White
 Male
 </td>
 <td style="text-align:right;">
-0
-</td>
-<td style="text-align:right;">
 0.6666667
-</td>
-<td style="text-align:right;">
-78392
-</td>
-<td style="text-align:right;">
-2
 </td>
 </tr>
 <tr>
 <td style="text-align:left;">
 A2NEN4NSNS2O8S
+</td>
+<td style="text-align:right;">
+3
+</td>
+<td style="text-align:right;">
+113774
+</td>
+<td style="text-align:right;">
+0
 </td>
 <td style="text-align:left;">
 Served
@@ -2789,21 +2807,21 @@ Native American
 Female
 </td>
 <td style="text-align:right;">
-0
-</td>
-<td style="text-align:right;">
 0.3333333
-</td>
-<td style="text-align:right;">
-113774
-</td>
-<td style="text-align:right;">
-3
 </td>
 </tr>
 <tr>
 <td style="text-align:left;">
 A2NEN4NSNS2O8S
+</td>
+<td style="text-align:right;">
+3
+</td>
+<td style="text-align:right;">
+31616
+</td>
+<td style="text-align:right;">
+1
 </td>
 <td style="text-align:left;">
 Served
@@ -2830,16 +2848,7 @@ White
 Male
 </td>
 <td style="text-align:right;">
-1
-</td>
-<td style="text-align:right;">
 0.5000000
-</td>
-<td style="text-align:right;">
-31616
-</td>
-<td style="text-align:right;">
-3
 </td>
 </tr>
 </tbody>
@@ -3937,7 +3946,13 @@ names(colname.immigrant) &lt;- c(&quot;subject&quot;, &quot;subject_trial_id&quo
 immigrant.dat &lt;- immigrant %&gt;% 
   rename(any_of(colname.immigrant)) %&gt;% 
   left_join(profiles.immigrant, colnames(profiles.immigrant)[-1]) %&gt;% 
-  mutate(trial_id = ceiling(row_number() / 2))
+  mutate(
+    trial_id = ceiling(row_number() / 2),
+    select = (select == &quot;Yes&quot;) * 1
+  ) %&gt;% 
+  rename_with(~ gsub(&quot;([ /])&quot;, &quot;&quot;, toTitleCase(.x)), .cols=3:11) %&gt;%  # make the column name camel cases
+  rename_with(~ paste0(.x, &quot;.&quot;), .cols=3:11) %&gt;%   # make attribute names end with &quot;.&quot;
+  relocate(c(trial_id, profile_id, select), .after = 1)  # let trial_id and profile_id be top columns
 
 immigrant.dat %&gt;% 
   head %&gt;% 
@@ -3955,37 +3970,43 @@ First 6 Row of Immigrant Experiment Potential Profiles
 subject
 </th>
 <th style="text-align:right;position: sticky; top:0; background-color: #FFFFFF;">
+trial_id
+</th>
+<th style="text-align:right;position: sticky; top:0; background-color: #FFFFFF;">
+profile_id
+</th>
+<th style="text-align:right;position: sticky; top:0; background-color: #FFFFFF;">
+select
+</th>
+<th style="text-align:right;position: sticky; top:0; background-color: #FFFFFF;">
 subject_trial_id
 </th>
 <th style="text-align:left;position: sticky; top:0; background-color: #FFFFFF;">
-Education
+Education.
 </th>
 <th style="text-align:left;position: sticky; top:0; background-color: #FFFFFF;">
-Gender
+Gender.
 </th>
 <th style="text-align:left;position: sticky; top:0; background-color: #FFFFFF;">
-Origin
+Origin.
 </th>
 <th style="text-align:left;position: sticky; top:0; background-color: #FFFFFF;">
-Application Reason
+ApplicationReason.
 </th>
 <th style="text-align:left;position: sticky; top:0; background-color: #FFFFFF;">
-Profession
+Profession.
 </th>
 <th style="text-align:left;position: sticky; top:0; background-color: #FFFFFF;">
-Job experience
+JobExperience.
 </th>
 <th style="text-align:left;position: sticky; top:0; background-color: #FFFFFF;">
-Job plans
+JobPlans.
 </th>
 <th style="text-align:left;position: sticky; top:0; background-color: #FFFFFF;">
-Prior trips to US
+PriorTripstoUS.
 </th>
 <th style="text-align:left;position: sticky; top:0; background-color: #FFFFFF;">
-Language
-</th>
-<th style="text-align:left;position: sticky; top:0; background-color: #FFFFFF;">
-select
+Language.
 </th>
 <th style="text-align:right;position: sticky; top:0; background-color: #FFFFFF;">
 ethnocentrism
@@ -3999,18 +4020,21 @@ LangPos
 <th style="text-align:right;position: sticky; top:0; background-color: #FFFFFF;">
 PriorPos
 </th>
-<th style="text-align:right;position: sticky; top:0; background-color: #FFFFFF;">
-profile_id
-</th>
-<th style="text-align:right;position: sticky; top:0; background-color: #FFFFFF;">
-trial_id
-</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td style="text-align:right;">
 4
+</td>
+<td style="text-align:right;">
+1
+</td>
+<td style="text-align:right;">
+830617
+</td>
+<td style="text-align:right;">
+1
 </td>
 <td style="text-align:right;">
 1
@@ -4043,9 +4067,6 @@ Entered U.S. once before on a tourist visa
 During admission interview, this applicant tried to speak English but
 was unable
 </td>
-<td style="text-align:left;">
-Yes
-</td>
 <td style="text-align:right;">
 50
 </td>
@@ -4058,16 +4079,19 @@ Yes
 <td style="text-align:right;">
 4
 </td>
-<td style="text-align:right;">
-830617
-</td>
-<td style="text-align:right;">
-1
-</td>
 </tr>
 <tr>
 <td style="text-align:right;">
 4
+</td>
+<td style="text-align:right;">
+1
+</td>
+<td style="text-align:right;">
+1433195
+</td>
+<td style="text-align:right;">
+0
 </td>
 <td style="text-align:right;">
 1
@@ -4101,9 +4125,6 @@ Entered the U.S. once before without legal authorization
 During admission interview, this applicant spoke [language] and used an
 interpreter
 </td>
-<td style="text-align:left;">
-No
-</td>
 <td style="text-align:right;">
 50
 </td>
@@ -4116,16 +4137,19 @@ No
 <td style="text-align:right;">
 4
 </td>
-<td style="text-align:right;">
-1433195
-</td>
-<td style="text-align:right;">
-1
-</td>
 </tr>
 <tr>
 <td style="text-align:right;">
 4
+</td>
+<td style="text-align:right;">
+2
+</td>
+<td style="text-align:right;">
+84805
+</td>
+<td style="text-align:right;">
+0
 </td>
 <td style="text-align:right;">
 2
@@ -4157,9 +4181,6 @@ Entered U.S. once before on a tourist visa
 <td style="text-align:left;">
 During the admission interview, this applicant spoke fluent English
 </td>
-<td style="text-align:left;">
-No
-</td>
 <td style="text-align:right;">
 50
 </td>
@@ -4172,16 +4193,19 @@ No
 <td style="text-align:right;">
 4
 </td>
-<td style="text-align:right;">
-84805
-</td>
-<td style="text-align:right;">
-2
-</td>
 </tr>
 <tr>
 <td style="text-align:right;">
 4
+</td>
+<td style="text-align:right;">
+2
+</td>
+<td style="text-align:right;">
+34442
+</td>
+<td style="text-align:right;">
+1
 </td>
 <td style="text-align:right;">
 2
@@ -4214,9 +4238,6 @@ Never been to the U.S.
 <td style="text-align:left;">
 During the admission interview, this applicant spoke fluent English
 </td>
-<td style="text-align:left;">
-Yes
-</td>
 <td style="text-align:right;">
 50
 </td>
@@ -4229,16 +4250,19 @@ Yes
 <td style="text-align:right;">
 4
 </td>
-<td style="text-align:right;">
-34442
-</td>
-<td style="text-align:right;">
-2
-</td>
 </tr>
 <tr>
 <td style="text-align:right;">
 4
+</td>
+<td style="text-align:right;">
+3
+</td>
+<td style="text-align:right;">
+701166
+</td>
+<td style="text-align:right;">
+1
 </td>
 <td style="text-align:right;">
 3
@@ -4271,9 +4295,6 @@ Entered the U.S. once before without legal authorization
 <td style="text-align:left;">
 During admission interview, this applicant spoke broken English
 </td>
-<td style="text-align:left;">
-Yes
-</td>
 <td style="text-align:right;">
 50
 </td>
@@ -4286,16 +4307,19 @@ Yes
 <td style="text-align:right;">
 4
 </td>
-<td style="text-align:right;">
-701166
-</td>
-<td style="text-align:right;">
-3
-</td>
 </tr>
 <tr>
 <td style="text-align:right;">
 4
+</td>
+<td style="text-align:right;">
+3
+</td>
+<td style="text-align:right;">
+1091
+</td>
+<td style="text-align:right;">
+0
 </td>
 <td style="text-align:right;">
 3
@@ -4327,9 +4351,6 @@ Never been to the U.S.
 <td style="text-align:left;">
 During the admission interview, this applicant spoke fluent English
 </td>
-<td style="text-align:left;">
-No
-</td>
 <td style="text-align:right;">
 50
 </td>
@@ -4341,12 +4362,6 @@ No
 </td>
 <td style="text-align:right;">
 4
-</td>
-<td style="text-align:right;">
-1091
-</td>
-<td style="text-align:right;">
-3
 </td>
 </tr>
 </tbody>
