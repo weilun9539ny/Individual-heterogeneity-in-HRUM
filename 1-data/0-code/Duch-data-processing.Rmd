@@ -5,6 +5,23 @@ date: "`r Sys.Date()`"
 output: html_document
 ---
 
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+```
+ 
+
+-   背景: 對 Duch et al., (2021) 的 CANDOUR survey 資料進行整理，方便後續分析作業。
+-   結果: 成功完成資料整理。
+-   未來工作: 以 linear regression, logistic regression 和 conditional logistic regression 分析此資料。
+
+## Data Desription
+
+資料來自於 [Duch et al. (2021) 的 CANCOUR survey](https://doi.org/10.1073/pnas.2026382118)，
+且有[公開資料](https://dataverse.harvard.edu/dataset.xhtml?persistentId=doi:10.7910/DVN/PMV0TG) 以及程式碼以供他人複製。
+此研究為人們對於 "有哪種特質的人更應該接受 COVID-19 疫苗施打" 的看法的 conjoint analysis。
+
 ```{r}
 dat <- read_rds("../1-raw/nbh_clean_conjoint_global.rds")
 ```
@@ -14,8 +31,6 @@ dat <- read_rds("../1-raw/nbh_clean_conjoint_global.rds")
 There are 5 attributes, all the potential profiles should be listed.
 
 ```{r}
-library(tidyverse)
-
 profiles <- with(
   dat,
   expand.grid(
