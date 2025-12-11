@@ -67,12 +67,12 @@ summary(candidate)
 
 ```{r candidate-profiles}
 profiles.candidate <- expand.grid(
-  "Military Service" = names(attr(candidate, "label.table")[[2]]),
+  MilitaryService = names(attr(candidate, "label.table")[[2]]),
   Religion = names(attr(candidate, "label.table")[[5]]),
   College = names(attr(candidate, "label.table")[[6]]),
   Profession = names(attr(candidate, "label.table")[[7]]),
   Income = names(attr(candidate, "label.table")[[8]]),
-  "Race/Ethnicity" = names(attr(candidate, "label.table")[[9]]),
+  RaceEthnicity = names(attr(candidate, "label.table")[[9]]),
   Age = names(attr(candidate, "label.table")[[3]]),
   Gender = names(attr(candidate, "label.table")[[4]])
 ) %>% 
@@ -109,9 +109,9 @@ colname.candidate <- colnames(candidate)[1:10]
 names(colname.candidate) <- c("subject", attr(candidate, "var.labels")[2:9], "select")
 candidate.dat <- candidate %>% 
   rename(any_of(colname.candidate)) %>%  # Name the attribute codings
+  rename_with(~ gsub("([ /])", "", .x)) %>%  # make the column name camel cases
   left_join(profiles.candidate, colnames(profiles.candidate)[-1]) %>% 
   mutate(trial_id = ceiling(row_number() / 2)) %>% 
-  rename_with(~ gsub("([ /])", "", .x)) %>%  # make the column name camel cases
   rename_with(~ paste0(.x, "."), .cols=2:9) %>%   # make attribute names end with "."
   relocate(c(trial_id, profile_id, select), .after = 1)  # let trial_id and profile_id be top columns
 
@@ -205,17 +205,17 @@ profiles.immigrant <- expand.grid(
   Education = names(attr(immigrant, "label.table")[[4]]),
   Gender = names(attr(immigrant, "label.table")[[3]]),
   Origin = names(attr(immigrant, "label.table")[[10]]),
-  "Application Reason" = names(attr(immigrant, "label.table")[[5]]),
+  ApplicationReason = names(attr(immigrant, "label.table")[[5]]),
   Profession = names(attr(immigrant, "label.table")[[9]]),
-  "Job experience" = names(attr(immigrant, "label.table")[[6]]),
-  "Job plans" = names(attr(immigrant, "label.table")[[7]]),
-  "Prior trips to US" = names(attr(immigrant, "label.table")[[2]]),
+  JobExperience = names(attr(immigrant, "label.table")[[6]]),
+  JobPlans = names(attr(immigrant, "label.table")[[7]]),
+  PriorTripstoUS = names(attr(immigrant, "label.table")[[2]]),
   Language = names(attr(immigrant, "label.table")[[8]])
 ) %>% 
   mutate(profile_id = 1:nrow(.), .before=1) %>% 
   filter(
     (!Profession %in% highly_skilled_job) | (Education %in% have_college_education),
-    (`Application Reason` != "Escape political/religious persecution") | (Origin %in% danger_country)
+    (ApplicationReason != "Escape political/religious persecution") | (Origin %in% danger_country)
   )
 
 str(profiles.immigrant)
@@ -250,12 +250,12 @@ colname.immigrant <- colnames(immigrant)[1:12]
 names(colname.immigrant) <- c("subject", "subject_trial_id", attr(immigrant, "var.labels")[3:11], "select")
 immigrant.dat <- immigrant %>% 
   rename(any_of(colname.immigrant)) %>% 
+  rename_with(~ gsub("([ /])", "", toTitleCase(.x)), .cols=3:11) %>%  # make the column name camel cases
   left_join(profiles.immigrant, colnames(profiles.immigrant)[-1]) %>% 
   mutate(
     trial_id = ceiling(row_number() / 2),
     select = (select == "Yes") * 1
   ) %>% 
-  rename_with(~ gsub("([ /])", "", toTitleCase(.x)), .cols=3:11) %>%  # make the column name camel cases
   rename_with(~ paste0(.x, "."), .cols=3:11) %>%   # make attribute names end with "."
   relocate(c(trial_id, profile_id, select), .after = 1)  # let trial_id and profile_id be top columns
 
