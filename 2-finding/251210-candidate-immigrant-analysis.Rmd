@@ -1,7 +1,7 @@
 ---
-title: "Analysis Candidate Experiment Data with AMCE, Logit Model and Conditional Logit Model"
+title: "Analysis Candidate Experiment Data with OLS, Logistic Model and Conditional Logistic Model"
 author: "Wei-Lun, Lin"
-# date: "`r Sys.Date()`"
+date: "`r Sys.Date()`"
 output: 
   html_document:
     code_folding: hide
@@ -64,29 +64,40 @@ est.all.candidate <- data.frame()
 ### Candidate: Linear Regression
 
 ```{r candidate-ols}
-ols.model <- glm(
-  select ~ `Military Service` + Religion + College + Profession + Income + `Race/Ethnicity` + Age + Gender,
-  family = gaussian,
-  data = candidate
+ols.candidate <- fit_model(
+  select ~ MilitaryService. + Religion. + College. + Profession. + Income. + RaceEthnicity. + Age. + Gender.,
+  dat = candidate, model = "ols"
 )
-ols.vcovCL <- cluster.vcov(ols.model, candidate$subject, df_correction = F)
-ols.candidate <- coeftest(ols.model, ols.vcovCL) %>% 
-  tidy() %>% 
-  filter(term != "(Intercept)")
+ols.candidate.clus <- fit_model(
+  select ~ MilitaryService. + Religion. + College. + Profession. + Income. + RaceEthnicity. + Age. + Gender.,
+  dat = candidate, model = "ols", cluster = "subject"
+)
 
-est.all.candidate <- ols.candidate %>% 
+est.all.candidate <- ols.candidate[[2]] %>% 
   select(-c(statistic, p.value)) %>% 
   mutate(
     CI.lower = estimate - 1.96*std.error,
     CI.upper = estimate + 1.96*std.error
   ) %>% 
-  rename_with(~ paste0(.x, ".OLS"), .cols = -c(term))
+  rename_with(~ paste0(.x, ".OLS"), .cols = -c(attribute, term))
+est.all.candidate <- ols.candidate.clus[[2]] %>% 
+  select(-c(statistic, p.value)) %>% 
+  mutate(
+    CI.lower = estimate - 1.96*std.error,
+    CI.upper = estimate + 1.96*std.error
+  ) %>% 
+  rename_with(~ paste0(.x, ".OLS_clustered"), .cols = -c(attribute, term)) %>% 
+  left_join(est.all.candidate, ., by = join_by(attribute, term))
 ```
 
-Result of OLS.
+<!-- Result of OLS. -->
 
-```{r ols-res}
-ols.candidate %>%
+```{r candidate-ols-res, include=F}
+ols.candidate[[2]] %>%
+  mutate(
+    CI.lower = estimate - 1.96*std.error,
+    CI.upper = estimate + 1.96*std.error
+  ) %>% 
   mutate_if(is.numeric, ~ round(.x, 3)) %>% 
   kable("html", caption="Result of Linear Regression Model for Candidate Experiment") %>% 
   kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F) %>%
@@ -94,39 +105,23 @@ ols.candidate %>%
 ```
 
 
-Plot the result of OLS.
+Plot the result of OLS, including clustered at subject and without clustering.
 
-```{r ols-plot, warning=F, message=F}
-ols.plot.candidate <- ols.candidate %>% 
+```{r candidate-ols-plot, warning=F, message=F}
+ols.plot.candidate <- est.all.candidate %>% 
+  select(c(attribute, term, contains("OLS"))) %>% 
+  select(c(attribute, term, starts_with("estimate."), starts_with("CI."))) %>% 
   mutate(term = factor(term, levels = rev(term))) %>% 
-  ggplot(aes(x = estimate, y = term)) +
-  geom_point(
-    position = position_dodge(width = 0.7),
-    alpha = .7
-  ) +
-  geom_errorbar(
-    aes(
-      xmin = estimate - 1.96*std.error,
-      xmax = estimate + 1.96*std.error
-    ),
-    position = position_dodge(width = 0.7),
-    linewidth = 0.5, alpha = .7
-  ) +
-  geom_vline(xintercept = 0, linetype = "dashed") +
-  theme(strip.text = element_text(face = "bold.italic")) +
-  # facet_grid(attribute ~ ., space = "free", scales = "free_y",) +
-  labs(
-    x = "AMCE", y = "", color = "", title = "Candidate Experiment: OLS"
-  ) +
-  # scale_y_discrete(limits = rev(levels("term"))) +
-  theme(
-    legend.position = "none",
-    text = element_text(size = 12),
-    strip.text = element_text(size = 12),
-    axis.text.y = element_text(size = 12),
-    legend.text = element_text(size = 12)
-  ) +
-  theme_light()
+  pivot_longer(
+    cols = -c(attribute, term),
+    names_to = c(".value", "model"),
+    names_pattern = "(.*)\\.(OLS|OLS_clustered)$"
+  ) %>%  
+  mutate(
+    model = fct_recode(model, "OLS without clustering" = "OLS", "OLS with subject clustered" = "OLS_clustered")
+  ) %>%
+  plot_result(., n.mod = 2) +
+  labs(title = "Candidate Experiment Fitted by OLS", x = "AMCE")
   
 ggsave("./1-figure/res-candidate-OLS.png", ols.plot.candidate)
 
@@ -136,33 +131,33 @@ ols.plot.candidate
 
 ### Logistic Regression
 
-```{r bl}
-bl.model <- glm(
-    select ~ `Military Service` + Religion + College + Profession + Income + `Race/Ethnicity` + Age + Gender,
+```{r candidate-logit}
+logit.model <- glm(
+    select ~ MilitaryService. + Religion. + College. + Profession. + Income. + RaceEthnicity. + Age. + Gender.,
     family = binomial(link = 'logit'),
     data = candidate
   )
 
-bl.vcovCL <- cluster.vcov(bl.model, candidate$subject, df_correction = FALSE)
-bl.candidate <- coeftest(bl.model, bl.vcovCL) %>%
-# bl.candidate <- bl.model %>% 
+logit.vcovCL <- cluster.vcov(logit.model, candidate$subject, df_correction = FALSE)
+logit.candidate <- coeftest(logit.model, logit.vcovCL) %>%
   tidy() %>% 
-  filter(term != "(Intercept)")
+  filter(term != "(Intercept)") %>% 
+  separate_wider_delim(term, ".", names = c("attribute", "term"), too_many = "merge")
 
-est.all.candidate <- bl.candidate %>% 
+est.all.candidate <- logit.candidate %>% 
   select(-c(statistic, p.value)) %>% 
   mutate(
     CI.lower = estimate - 1.96*std.error,
     CI.upper = estimate + 1.96*std.error
   ) %>% 
-  rename_with(~ paste0(.x, ".BL"), .cols = -c(term)) %>% 
-  left_join(est.all.candidate, ., by = join_by(term))
+  rename_with(~ paste0(.x, ".logit"), .cols = -c(attribute, term)) %>% 
+  left_join(est.all.candidate, ., by = join_by(attribute, term))
 ```
 
-Result of logit model.
+Result of logistic regression.
 
-```{r bl-res}
-bl.candidate %>%
+```{r candidate-logit-res}
+logit.candidate %>%
   mutate_if(is.numeric, ~ round(.x, 3)) %>% 
   kable("html", caption="Result of Logit Regression Model for Candidate Experiment") %>% 
   kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F) %>%
@@ -172,10 +167,10 @@ bl.candidate %>%
 
 Plot the result of logistic regression.
 
-```{r bl-plot, warning=F, message=F}
-bl.plot.candidate <- bl.candidate %>% 
+```{r candidate-logit-plot, warning=F, message=F}
+logit.plot.candidate <- logit.candidate %>% 
   mutate(term = factor(term, levels = rev(term))) %>% 
-  ggplot(aes(x = estimate, y = term)) +
+  ggplot(aes(x = estimate, y = term, color = attribute)) +
   geom_point(
     position = position_dodge(width = 0.7),
     alpha = .7
@@ -190,9 +185,8 @@ bl.plot.candidate <- bl.candidate %>%
   ) +
   geom_vline(xintercept = 0, linetype = "dashed") +
   theme(strip.text = element_text(face = "bold.italic")) +
-  # facet_grid(attribute ~ ., space = "free", scales = "free_y",) +
   labs(
-    x = "Effect Estimation", y = "", color = "", title = "Candidate Experiment: Logistic Regression"
+    x = "Effect Estimation", y = "", color = "Attributes", title = "Candidate Experiment Fitted by Logistic Regression"
   ) +
   # scale_y_discrete(limits = rev(levels("term"))) +
   theme(
@@ -204,37 +198,53 @@ bl.plot.candidate <- bl.candidate %>%
   ) +
   theme_light()
 
-ggsave("./1-figure/res-candidate-BL.png", bl.plot.candidate)
-bl.plot.candidate
+ggsave("./1-figure/res-candidate-logit.png", logit.plot.candidate)
+logit.plot.candidate
 ```
 
 
 ### Conditional Logistic Regression
 
-```{r cl}
-cl.model <- clogit(
-  select ~ `Military Service` + Religion + College + Profession + Income + `Race/Ethnicity` + Age + Gender + strata(trial_id),
+```{r candidate-cl}
+# original conditional logistic regression
+cl.candidate <- clogit(
+  select ~ MilitaryService. + Religion. + College. + Profession. + Income. + RaceEthnicity. + Age. + Gender. + strata(trial_id),
   data = candidate
-)
-
-# cl.vcovCL <- cluster.vcov(cl.model, global_data[["country"]], df_correction = FALSE)
-# cl.res <- coeftest(cl.model, cl.vcovCL) %>% 
-cl.candidate <- cl.model %>% 
+) %>% 
   tidy() %>% 
-  filter(term != "(Intercept)")
+  filter(term != "(Intercept)") %>% 
+  separate_wider_delim(term, ".", names = c("attribute", "term"), too_many = "merge")
 
+# original conditional logistic regression with clustered standard error
+cl_clustered.candidate <- clogit(
+  select ~ MilitaryService. + Religion. + College. + Profession. + Income. + RaceEthnicity. + Age. + Gender. + strata(trial_id),
+  data = candidate, method = "efron", cluster = candidate[["subject"]]
+) %>% 
+  tidy() %>% 
+  filter(term != "(Intercept)") %>% 
+  separate_wider_delim(term, ".", names = c("attribute", "term"), too_many = "merge")
+
+# store the result
 est.all.candidate <- cl.candidate %>% 
   select(-c(statistic, p.value)) %>% 
   mutate(
     CI.lower = estimate - 1.96*std.error,
     CI.upper = estimate + 1.96*std.error
   ) %>% 
-  rename_with(~ paste0(.x, ".CL"), .cols = -c(term)) %>% 
-  left_join(est.all.candidate, ., by = join_by(term))
+  rename_with(~ paste0(.x, ".CL"), .cols = -c(attribute, term)) %>% 
+  left_join(est.all.candidate, ., by = join_by(attribute, term))
+est.all.candidate <- cl_clustered.candidate %>% 
+  select(-c(statistic, p.value)) %>% 
+  mutate(
+    CI.lower = estimate - 1.96*robust.se,
+    CI.upper = estimate + 1.96*robust.se
+  ) %>% 
+  rename_with(~ paste0(.x, ".CL_clustered"), .cols = -c(attribute, term)) %>% 
+  left_join(est.all.candidate, ., by = join_by(attribute, term))
 ```
 
 
-``` {r cl-res}
+``` {r candidate-cl-res}
 cl.candidate %>% 
   mutate_if(is.numeric, ~ round(.x, 3)) %>% 
   kable("html", caption="Result of Conditional Logistic Regression") %>% 
@@ -243,31 +253,33 @@ cl.candidate %>%
 ```
 
 
-```{r cl-plot, message=F}
-cl.plot.candidate <- cl.candidate %>% 
-  mutate(term = factor(term, levels = rev(term))) %>% 
-  ggplot(aes(x = estimate, y = term)) +
+```{r candidate-cl-plot, message=F}
+cl.plot.candidate <- 0
+# cl.candidate %>% 
+est.all.candidate %>% 
+  select(1:2 | ends_with(".CL") | ends_with(".CL_clustered")) %>% 
+  select(1:2 | starts_with("estimate") | starts_with("CI")) %>% 
+  mutate(term = factor(term, levels = rev(term))) %>%
+  # pivot_longer(starts_with("estimate"), names_to = "model", names_prefix = "estimate.", values_to = "estimate") %>% 
+  pivot_longer(-(1:2), cols_vary = "slowest", names_to = c(".value", "model"), names_pattern = "(.*)\\.(.*)") %>% 
+  ggplot(aes(x = estimate, y = term, color = model)) +
   geom_point(
-    position = position_dodge(width = 0.7),
+    # position = position_dodge(width = 0.6),
     alpha = .7
   ) +
   geom_errorbar(
     aes(
-      xmin = estimate - 1.96*std.error,
-      xmax = estimate + 1.96*std.error
+      xmin = CI.lower,
+      xmax = CI.upper
     ),
-    position = position_dodge(width = 0.7),
+    # position = position_dodge(width = 0.6),
     linewidth = 0.5, alpha = .7
   ) +
   geom_vline(xintercept = 0, linetype = "dashed") +
-  theme(strip.text = element_text(face = "bold.italic")) +
-  # facet_grid(attribute ~ ., space = "free", scales = "free_y",) +
   labs(
-    x = "Effect Estimation", y = "", color = "", title = "Candidate Experiment: Conditional Logistic"
+    x = "Effect Estimation", y = "", color = "w/ or w/o cluster se", title = "Candidate Experiment Fitted by Conditional Logistic"
   ) +
-  # scale_y_discrete(limits = rev(levels("term"))) +
   theme(
-    legend.position = "none",
     text = element_text(size = 12),
     strip.text = element_text(size = 12),
     axis.text.y = element_text(size = 12),
