@@ -74,34 +74,90 @@ tidy_coefs <- function(col) {
                             "countryUS")))
   
   return(tidy_col)
+}
+
+
+fit_model <- function(formula, dat, model = "ols", is_cluster = F, cluster = "ClusterColName") {
+  # detect type of model
+  if (model %in% c("ols", "linear regression")) {
+    mod <- 1
+  } else if (model %in% c("logit", "logistic", "logistic regression")) {
+    mod <- 2
+  } else if (model %in% c("cl", "clogit", "conditional logistic", "conditional logistic regression")) {
+    mod <- 3
+  } else {
+    warning("Model not defined! Fitting OLS!")
+    mod <- 1
+  }
   
+  # initialize output
+  res <- list(
+    "model" = NA,
+    "result" = NA
+  )
+  
+  if (cluster != "ClusterColName") is_cluster <- T
+  # model fitting
+  if (mod == 3) {  # clogit
+    if (is_cluster) {  # check if the clutser-robust standard error should be controled
+      mod.res <- clogit(
+        formula, data = dat, model = T,
+        method = "efron", cluster = subject
+      )
+    } else {
+      mod.res <- clogit(formula, data = dat)
+    }
+    res[[1]] <- mod.res
+  } else {  # OLS or logit
+    if (mod == 1) {
+      mod.res <- glm(formula, family = gaussian, data = dat)
+    } else if (mod == 2) {
+      mod.res <- glm(formula, family = binomial(link = 'logit'), data=dat)
+    }
+    
+    # apply cluster-robust standard error or not
+    if (is_cluster) {
+      mod.vcovCL <- cluster.vcov(mod.res, dat[[cluster]], df_correction = FALSE)
+      mod.res <- coeftest(mod.res, mod.vcovCL)
+    }
+    res[[1]] <- mod.res
+  }
+  
+  # output the result data frame
+  res.df <- mod.res %>% 
+    tidy() %>% 
+    filter(term != "(Intercept)") %>% 
+    separate_wider_delim(term, ".", names = c("attribute", "term"), too_many = "merge")
+  res[[2]] <- res.df
+  
+  return(res)
 }
 
 
 # Plot Model Fitting Result
-plot_result <- function(res.df) {
-  ggplot(res.df, aes(x = estimate, y = term)) +
+plot_result <- function(res.df, n.mod) {
+  if (n.mod <= 1) {
+    base.plot <- ggplot(res.df, aes(x = estimate, y = term))
+  } else {
+    base.plot <- ggplot(res.df, aes(x = estimate, y = term, color = model))
+  }
+  base.plot +
     geom_point(
       position = position_dodge(width = 0.7),
       alpha = .7
     ) +
-    geom_errorbarh(
+    geom_errorbar(
       aes(
-        xmin = estimate - 1.96*std.error,
-        xmax = estimate + 1.96*std.error
+        xmin = CI.lower,
+        xmax = CI.upper
       ),
       position = position_dodge(width = 0.7),
       linewidth = 0.5, alpha = .7
     ) +
     geom_vline(xintercept = 0, linetype = "dashed") +
     theme(strip.text = element_text(face = "bold.italic")) +
-    # facet_grid(attribute ~ ., space = "free", scales = "free_y",) +
-    labs(
-      x = "Effect Estimation", y = "", color = ""
-    ) +
-    scale_y_discrete(limits = rev(levels("term"))) +
+    labs(y = "") +
     theme(
-      legend.position = "none",
       text = element_text(size = 12),
       strip.text = element_text(size = 12),
       axis.text.y = element_text(size = 12),

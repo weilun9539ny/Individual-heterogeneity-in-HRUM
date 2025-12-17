@@ -1,0 +1,382 @@
+---
+title: "Analysis Candidate Experiment Data with OLS, Logistic Model and Conditional Logistic Model, Plus Clustering"
+author: "Wei-Lun, Lin"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    code_folding: hide
+    toc: true
+    toc_float: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)  # data processing
+library(broom)
+library(kableExtra)  # print table
+library(survival)
+
+library(sandwich)
+library(lmtest)
+library(multiwayvcov)
+
+library(rsample)
+source("./0-code/functions.R")
+```
+
+-   背景: 先前以 OLS, logistic regression, conditional logistic regression 分析 Hainmueller et al. (2014) 的 candidate experiment 資料，並於此文件進一步比較有無對受試者層次做 cluster-robust standand error 對於估計上的差異。
+-   結果: OLS 得到的 AMCE 和 logistic regression 得到的估計非常接近，而 logistic 和 conditional logistic regression 的估計結果也相差不大。此外，分別比較 logistic 和 conditional logistic regression 可以發現，控制 cluster-robust standard error 前後得到的 standard error 也很類似，此結果和實驗的隨機生成 profiles 機制息息相關。
+-   未來工作: 再加入無母數的方法，先對受試者的潛在分群特徵做分群，再用模型分別 fit 資料，並比較事先和事後控制 cluster 所得到的表現。
+
+
+## Candidate Experiment
+
+```{r import-data-candidate}
+candidate <- read_rds("../1-data/2-processed/candidate_data.rds")
+candidate %>% 
+  head() %>% 
+  kable("html", caption="First 6 Row of Candidate Data") %>% 
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F) %>% 
+  scroll_box(width = "100%")
+```
+
+在 candidate experiment 中，candidate 有8個 attributes:
+
+| Attribute | Level 1 | Level 2 | Level 3 | Level 4 | Level 5 | Level 6 |
+|-----------|--------|---------------|--------|--------|-------------|-------------|
+| Religion (6) | Catholic | Evangelical Protestant | Mainline Protestant | Mormon | Jewish | None |
+| College education (6) | no college | state university | community college | Baptist college | Ivy League college | small college |
+| Profession (6) | lawyer | high school teacher | business owner | farmer | doctor | car dealer |
+| Annual income (6) | \$32K | \$54K | \$65K | \$92K | \$210K | \$5.1M |
+| Racial/ethnic background (6) | Hispanic | White | Caucasian | Black | Asian American | Native American |
+| Age (6) | 36 | 45 | 52 | 60 | 68 | 70 |
+| Military service (6) | served | not served | \- | \- | \- | \- |
+| Gender (6) | male | female | \- | \- | \- | \- |
+
+
+## Model Fitting
+
+```{r candidate-res-all}
+est.all.candidate <- data.frame()
+```
+
+
+### Candidate: Linear Regression
+
+```{r candidate-ols}
+ols.candidate <- fit_model(
+  select ~ MilitaryService. + Religion. + College. + Profession. + Income. + RaceEthnicity. + Age. + Gender.,
+  dat = candidate, model = "ols"
+)
+ols_clus.candidate <- fit_model(
+  select ~ MilitaryService. + Religion. + College. + Profession. + Income. + RaceEthnicity. + Age. + Gender.,
+  dat = candidate, model = "ols", cluster = "subject"
+)
+
+est.all.candidate <- ols.candidate[[2]] %>% 
+  select(-c(statistic, p.value)) %>% 
+  mutate(
+    CI.lower = estimate - 1.96*std.error,
+    CI.upper = estimate + 1.96*std.error
+  ) %>% 
+  rename_with(~ paste0(.x, ".OLS"), .cols = -c(attribute, term))
+est.all.candidate <- ols_clus.candidate[[2]] %>% 
+  select(-c(statistic, p.value)) %>% 
+  mutate(
+    CI.lower = estimate - 1.96*std.error,
+    CI.upper = estimate + 1.96*std.error
+  ) %>% 
+  rename_with(~ paste0(.x, ".OLS_clustered"), .cols = -c(attribute, term)) %>% 
+  left_join(est.all.candidate, ., by = join_by(attribute, term))
+```
+
+<!-- Result of OLS. -->
+
+```{r candidate-ols-res, include=F}
+ols.candidate[[2]] %>%
+  mutate(
+    CI.lower = estimate - 1.96*std.error,
+    CI.upper = estimate + 1.96*std.error
+  ) %>% 
+  mutate_if(is.numeric, ~ round(.x, 3)) %>% 
+  kable("html", caption="Result of Linear Regression Model for Candidate Experiment") %>% 
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F) %>%
+  scroll_box(height = "500pt")
+```
+
+
+Plot the result of OLS, including clustered at subject and without clustering.
+
+```{r candidate-ols-plot, warning=F, message=F}
+ols.plot.candidate <- est.all.candidate %>% 
+  select(c(attribute, term, contains("OLS"))) %>% 
+  select(c(attribute, term, starts_with("estimate."), starts_with("CI."))) %>% 
+  mutate(term = factor(term, levels = rev(term))) %>% 
+  pivot_longer(
+    cols = -c(attribute, term),
+    names_to = c(".value", "model"),
+    names_pattern = "(.*)\\.(OLS|OLS_clustered)$"
+  ) %>%  
+  mutate(
+    model = fct_recode(model, "OLS\nwithout clustering" = "OLS", "OLS\nwith subject clustered" = "OLS_clustered")
+  ) %>%
+  plot_result(., n.mod = 2) +
+  labs(title = "Candidate Experiment Fitted by OLS", x = "AMCE", color="Clustering")
+  
+ggsave("./1-figure/res-candidate-OLS.png", ols.plot.candidate)
+
+ols.plot.candidate
+```
+
+
+### Logistic Regression
+
+```{r candidate-logit}
+logit.candidate <- fit_model(
+  select ~ MilitaryService. + Religion. + College. + Profession. + Income. + RaceEthnicity. + Age. + Gender.,
+  dat = candidate, model = "logit"
+)
+logit_clus.candidate <- fit_model(
+  select ~ MilitaryService. + Religion. + College. + Profession. + Income. + RaceEthnicity. + Age. + Gender.,
+  dat = candidate, model = "logit", cluster = "subject"
+)
+
+est.all.candidate <- logit.candidate[[2]] %>% 
+  select(-c(statistic, p.value)) %>% 
+  mutate(
+    CI.lower = estimate - 1.96*std.error,
+    CI.upper = estimate + 1.96*std.error
+  ) %>% 
+  rename_with(~ paste0(.x, ".logit"), .cols = -c(attribute, term)) %>% 
+  left_join(est.all.candidate, ., by = join_by(attribute, term))
+est.all.candidate <- logit_clus.candidate[[2]] %>% 
+  select(-c(statistic, p.value)) %>% 
+  mutate(
+    CI.lower = estimate - 1.96*std.error,
+    CI.upper = estimate + 1.96*std.error
+  ) %>% 
+  rename_with(~ paste0(.x, ".logit_clustered"), .cols = -c(attribute, term)) %>% 
+  left_join(est.all.candidate, ., by = join_by(attribute, term))
+```
+
+<!-- Result of logistic regression. -->
+
+```{r candidate-logit-res, include=F}
+logit.candidate[[2]] %>%
+  mutate_if(is.numeric, ~ round(.x, 3)) %>% 
+  kable("html", caption="Result of Logit Regression Model for Candidate Experiment") %>% 
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F) %>%
+  scroll_box(height = "500pt")
+```
+
+
+Plot the result of logistic regression.
+
+```{r candidate-logit-plot, warning=F, message=F}
+logit.plot.candidate <- est.all.candidate %>% 
+  select(c(
+    attribute, term, (
+      contains("logit") & (starts_with("estimate.") | starts_with("CI."))
+    )
+  )) %>% 
+  mutate(term = factor(term, levels = rev(term))) %>% 
+  pivot_longer(
+    cols = -c(attribute, term),
+    names_to = c(".value", "model"),
+    names_pattern = "(.*)\\.(logit|logit_clustered)$"
+  ) %>%  
+  mutate(
+    model = fct_recode(
+      model, 
+      "Logistic regression\nwithout clustering" = "logit",
+      "Logistic regression\nwith subject clustered" = "logit_clustered"
+    )
+  ) %>%
+  plot_result(., n.mod = 2) +
+  labs(title = "Candidate Experiment Fitted by Logistic Regression", x = "Estimated Effects", color="Clustering")
+
+ggsave("./1-figure/res-candidate-logit.png", logit.plot.candidate)
+logit.plot.candidate
+```
+
+
+### Conditional Logistic Regression
+
+```{r candidate-cl}
+# original conditional logistic regression
+cl.candidate <- fit_model(
+  select ~ MilitaryService. + Religion. + College. + Profession. + Income. + RaceEthnicity. + Age. + Gender. + strata(trial_id),
+  dat = candidate, model = "clogit"
+)
+cl_clus.candidate <- fit_model(
+  select ~ MilitaryService. + Religion. + College. + Profession. + Income. + RaceEthnicity. + Age. + Gender. + strata(trial_id),
+  dat = candidate, model = "clogit", is_cluster = T
+)
+
+est.all.candidate <- cl.candidate[[2]] %>% 
+  select(-c(statistic, p.value)) %>% 
+  mutate(
+    CI.lower = estimate - 1.96*std.error,
+    CI.upper = estimate + 1.96*std.error
+  ) %>% 
+  rename_with(~ paste0(.x, ".CL"), .cols = -c(attribute, term)) %>% 
+  left_join(est.all.candidate, ., by = join_by(attribute, term))
+est.all.candidate <- cl_clus.candidate[[2]] %>% 
+  select(-c(statistic, p.value)) %>% 
+  mutate(
+    std.error = robust.se,
+    CI.lower = estimate - 1.96*std.error,
+    CI.upper = estimate + 1.96*std.error
+  ) %>% 
+  select(-robust.se) %>% 
+  rename_with(~ paste0(.x, ".CL_clustered"), .cols = -c(attribute, term)) %>% 
+  left_join(est.all.candidate, ., by = join_by(attribute, term))
+```
+
+
+``` {r candidate-cl-res, include=F}
+cl.candidate[[2]] %>% 
+  mutate_if(is.numeric, ~ round(.x, 3)) %>% 
+  kable("html", caption="Result of Conditional Logistic Regression") %>% 
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F) %>%
+  scroll_box(height = "500pt")
+```
+
+
+```{r candidate-cl-plot, message=F}
+cl.plot.candidate <- est.all.candidate %>% 
+  select(c(
+    attribute, term, (
+      contains("CL", ignore.case = F) & (starts_with("estimate.") | starts_with("CI."))
+    )
+  )) %>% 
+  mutate(term = factor(term, levels = rev(term))) %>% 
+  pivot_longer(
+    cols = -c(attribute, term),
+    names_to = c(".value", "model"),
+    names_pattern = "(.*)\\.(CL|CL_clustered)$"
+  ) %>%  
+  mutate(
+    model = fct_recode(
+      model, 
+      "Conditional logistic\nwithout clustering" = "CL",
+      "Conditional logistic\nwith subject clustered" = "CL_clustered"
+    )
+  ) %>%
+  plot_result(., n.mod = 2) +
+  labs(title = "Candidate Experiment Fitted by Condtional Logistic Regression", x = "Estimated Effects", color="Clustering")
+
+ggsave("./1-figure/res-candidate-CL.png", cl.plot.candidate)
+cl.plot.candidate
+```
+
+
+## Result Comparison
+
+### Logistic and Conditional Logistic Regression w/ and w/o Clustering
+
+```{r plot-all, fig.width=9, fig.height=8, out.height="100%"}
+est.all.candidate %>% 
+  select(-contains("OLS")) %>% 
+  mutate(term = factor(term, levels = rev(term))) %>% 
+  pivot_longer(
+    cols = -c(attribute,term),
+    names_to = c(".value", "model"),
+    names_pattern = "(.*)\\.(logit.*|CL.*)$"
+  ) %>%  
+  mutate(
+    model = fct_recode(
+      model,
+      "Logistic regression\nwithout clustering" = "logit",
+      "Logistic regression\nwith subject clustered" = "logit_clustered",
+      "Conditional logistic\nwithout clustering" = "CL",
+      "Conditional logistic\nwith subject clustered" = "CL_clustered"
+    )
+  ) %>% 
+  plot_result(., n.mod=4) +
+  labs(
+    x = "Effect estimate", col="Model",
+    title = "Candidate Experiment: Comparison Between Logistic and Conditional Logistic"
+  ) +
+  theme(
+      # legend.position = "bottom",
+      plot.title.position = "plot"
+    )
+ggsave("./1-figure/res-candidate-BL+CL.png")
+```
+
+Robust se 的膨脹程度通常可以由 Moulton factor 做近似:
+
+$$
+\frac{SE_{robust}}{SE_{standard}} \approx \sqrt{1+(n-1)\rho_x \rho_\varepsilon}
+$$
+
+，其中 $n$ 是 cluster size，$\pho_x$ 是 attributes 在 cluster 內部的相關性，而 $\rho_\varepsilon$ 則是殘差的相關性。
+
+由於 conjoint experiment 的 randomization 設計，使得每位受試者觀察到的 attributes 之間不存在相關性，
+因此 Moulton factor 會約為 1，說明了原本的 standard error 和 cluster-robust standard error 之間為何差異不大。
+
+
+<!-- ### Cross-Validatoin -->
+
+```{r cv, include=F}
+calc_accuracy <- function(split, model_type) {
+  train_df <- analysis(split)
+  test_df <- assessment(split)
+  
+  # 根據模型類型訓練
+  if (model_type == "OLS") {
+    mod <- glm(
+      select ~ MilitaryService. + Religion. + College. + Profession. + Income. + RaceEthnicity. + Age. + Gender., 
+      family = gaussian, data = train_df
+    )
+    pred <- predict(mod, newdata = test_df)
+  } else if (model_type == "logit") {
+    mod <- glm(
+      select ~ MilitaryService. + Religion. + College. + Profession. + Income. + RaceEthnicity. + Age. + Gender.,
+      family = binomial(link = 'logit'), data = train_df
+    )
+    pred <- predict(mod, newdata = test_df, type = "response")
+  } else if (model_type == "cl") {
+    mod <- clogit(
+      select ~ MilitaryService. + Religion. + College. + Profession. + Income. + RaceEthnicity. + Age. + Gender. + strata(trial_id), 
+      data = train_df, model = TRUE
+    )
+    test_df_new <- test_df
+    test_df_new$trial_id <- train_df$trial_id[1]
+    pred <- predict(mod, newdata = test_df_new, type = "lp")
+  }
+  
+  # 計算 Accuracy (Hit Rate)
+  # 將預測值塞回 test_df 進行比較
+  test_df %>%
+    mutate(score = pred) %>%
+    group_by(trial_id) %>%
+    summarise(
+      actual_winner = which.max(select),
+      pred_winner = which.max(score),
+      hit = (actual_winner == pred_winner)
+    ) %>%
+    summarise(acc = mean(hit)) %>%
+    pull(acc)
+}
+
+set.seed(2025)
+cv_results <- group_vfold_cv(candidate, group = "trial_id", v = 10) %>%
+  mutate(
+    acc_ols = map_dbl(splits, calc_accuracy, model_type = "OLS"),
+    acc_logit = map_dbl(splits, calc_accuracy, model_type = "logit"),
+    acc_clogit = map_dbl(splits, calc_accuracy, model_type = "cl")
+  )
+
+# 5. 查看結果平均值
+cv_results %>%
+  summarise(
+    OLS_Mean_Acc = mean(acc_ols),
+    Logit_Mean_Acc = mean(acc_logit),
+    Clogit_Mean_Acc = mean(acc_clogit)
+  )
+```
+
+
