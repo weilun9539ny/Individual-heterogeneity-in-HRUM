@@ -77,7 +77,7 @@ tidy_coefs <- function(col) {
 }
 
 
-fit_model <- function(formula, dat, model = "ols", is_cluster = F, cluster = "ClusterColName") {
+fit_model <- function(formula, dat, model = "ols", is_cluster = F, cluster = "ClusterColName", ...) {
   # detect type of model
   if (model %in% c("ols", "linear regression")) {
     mod <- 1
@@ -85,6 +85,8 @@ fit_model <- function(formula, dat, model = "ols", is_cluster = F, cluster = "Cl
     mod <- 2
   } else if (model %in% c("cl", "clogit", "conditional logistic", "conditional logistic regression")) {
     mod <- 3
+  } else if (model == "amce") {
+    mod <- 4
   } else {
     warning("Model not defined! Fitting OLS!")
     mod <- 1
@@ -98,14 +100,13 @@ fit_model <- function(formula, dat, model = "ols", is_cluster = F, cluster = "Cl
   
   if (cluster != "ClusterColName") is_cluster <- T
   # model fitting
-  if (mod == 3) {  # clogit
-    if (is_cluster) {  # check if the clutser-robust standard error should be controled
-      mod.res <- clogit(
-        formula, data = dat, model = T,
-        method = "efron", cluster = subject
-      )
-    } else {
-      mod.res <- clogit(formula, data = dat)
+  if (mod >= 3) {  # clogit or amce
+    if (is_cluster) {  # check if the cluster-robust standard error should be controlled
+      if (mod == 3) mod.res <- clogit(formula, data = dat, model = T, method = "efron", cluster = subject)
+      else mod.res <- amce(formula, data = dat, cluster = T, respondent.id = cluster, ...)
+    } else {  # no clustering
+      if (mod == 3) mod.res <- clogit(formula, data = dat)
+      else mod.res <- amce(formula, data = dat, cluster = F, ...)
     }
     res[[1]] <- mod.res
   } else {  # OLS or logit
@@ -124,10 +125,26 @@ fit_model <- function(formula, dat, model = "ols", is_cluster = F, cluster = "Cl
   }
   
   # output the result data frame
-  res.df <- mod.res %>% 
-    tidy() %>% 
-    filter(term != "(Intercept)") %>% 
-    separate_wider_delim(term, ".", names = c("attribute", "term"), too_many = "merge")
+  if (mod == 4) {
+    res.df <- summary(mod.res)$amce %>% 
+      rename_with(~ tolower(.)) %>% 
+      rename(
+        term = level,
+        std.error = "std. err",
+        statistic = "z value",
+        p.value = "pr(>|z|)"
+      ) %>% 
+      select(1:6)
+  } else {
+    res.df <- mod.res %>% 
+      tidy() %>% 
+      filter(term != "(Intercept)") %>%
+      mutate(
+        attribute = str_remove_all(term, "\\.[^:]*"),
+        term = str_remove_all(term, "(?<=^|:)[^:.]+\\."),
+        .before = 1
+      )
+  }
   res[[2]] <- res.df
   
   return(res)
