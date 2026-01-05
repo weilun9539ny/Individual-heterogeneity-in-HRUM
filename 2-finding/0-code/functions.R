@@ -77,7 +77,7 @@ tidy_coefs <- function(col) {
 }
 
 
-fit_model <- function(formula, dat, model = "ols", is_cluster = F, cluster = "ClusterColName", ...) {
+fit_model <- function(formula, dat, model = "ols", is_cluster = F, cluster = "ClusterColName", design = "design") {
   # detect type of model
   if (model %in% c("ols", "linear regression")) {
     mod <- 1
@@ -103,10 +103,10 @@ fit_model <- function(formula, dat, model = "ols", is_cluster = F, cluster = "Cl
   if (mod >= 3) {  # clogit or amce
     if (is_cluster) {  # check if the cluster-robust standard error should be controlled
       if (mod == 3) mod.res <- clogit(formula, data = dat, model = T, method = "efron", cluster = subject)
-      else mod.res <- amce(formula, data = dat, cluster = T, respondent.id = cluster, ...)
+      else mod.res <- amce(formula, data = dat, cluster = T, respondent.id = cluster, design = design)
     } else {  # no clustering
       if (mod == 3) mod.res <- clogit(formula, data = dat)
-      else mod.res <- amce(formula, data = dat, cluster = F, ...)
+      else mod.res <- amce(formula, data = dat, cluster = F, design = design)
     }
     res[[1]] <- mod.res
   } else {  # OLS or logit
@@ -134,7 +134,8 @@ fit_model <- function(formula, dat, model = "ols", is_cluster = F, cluster = "Cl
         statistic = "z value",
         p.value = "pr(>|z|)"
       ) %>% 
-      select(1:6)
+      select(1:6) %>% 
+      mutate(attribute = str_replace_all(attribute, "[.]", ""))
   } else {
     res.df <- mod.res %>% 
       tidy() %>% 
