@@ -118,7 +118,7 @@ fit_model <- function(formula, dat, model = "ols", is_cluster = F, cluster = "Cl
     
     # apply cluster-robust standard error or not
     if (is_cluster) {
-      mod.vcovCL <- cluster.vcov(mod.res, dat[[cluster]], df_correction = FALSE)
+      mod.vcovCL <- vcovCL(mod.res, dat[[cluster]])
       mod.res <- coeftest(mod.res, mod.vcovCL)
     }
     res[[1]] <- mod.res
