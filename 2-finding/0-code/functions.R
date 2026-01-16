@@ -185,3 +185,56 @@ plot_result <- function(res.df, n.mod) {
 }
 
 
+compute_immigrant_AME <- function(mod, file, is_cluster = T) {
+  # `mod` is the target model
+  # `file` is the path to the AME object
+  # `is_cluster` indicates should the AME clustered by subject
+  
+  # initialization
+  if (is_cluster) cluster <- vcovCL(mod, cluster = immigrant$subject)
+  else cluster <- T
+  # start
+  if (file.exists(file)) {
+    cat("File Found! \nReading file... \n\n")
+    res <- read_rds(file)
+  } else {
+    cat("File not found! \nComputing AME... \n\n")
+    # prepare for filtering
+    high_edu <- paste0("Education.", 5:7)
+    high_prof <- unique(immigrant$Profession.)[8:11]
+    danger_ctry <- unique(immigrant$Origin.)[c(1, 8:10)]
+    # w/o clustering
+    AME.indep <- avg_comparisons(
+      model = mod, vcov = cluster,
+      variables = c("Gender.", "JobExperience.", "JobPlans.", "PriorTripstoUS.", "Language.")
+    )
+    AME.prof <- avg_comparisons(  # AME of profession
+      model = mod, vcov = cluster, variables = "Profession.",
+      newdata = subset(immigrant, Education. %in% high_edu)  # compute w/ only high education
+    )
+    print("prof done") ########
+    AME.educ <- avg_comparisons(  # AME of education state
+      model = mod, vcov = cluster, variables = "Education.",
+      newdata = subset(immigrant, !Profession. %in% high_prof)  # compute w/o special professions
+    )
+    AME.orig <- avg_comparisons(  # AME of origin
+      model = mod, vcov = cluster, variables = "Origin.",
+      newdata = subset(immigrant, ApplicationReason. != "ApplicationReason.3")  # compute w/o escape persecution
+    )
+    AME.appl <- avg_comparisons(  # AME of application reason
+      model = mod, vcov = cluster, variables = "ApplicationReason.",
+      newdata = subset(immigrant, Origin. %in% danger_ctry)  # compute w/ only from dangerous country
+    )
+    
+    # combine AMEs
+    AME <- rbind(
+      AME.indep, 
+      AME.prof,
+      AME.educ,
+      AME.orig,
+      AME.appl
+    )
+    write_rds(AME, file)
+  }
+}
+
