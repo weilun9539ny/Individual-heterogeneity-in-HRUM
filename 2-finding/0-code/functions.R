@@ -175,6 +175,7 @@ plot_result <- function(res.df, n.mod) {
     geom_vline(xintercept = 0, linetype = "dashed") +
     theme(strip.text = element_text(face = "bold.italic")) +
     labs(y = "") +
+    guides(color = guide_legend(reverse = TRUE)) +
     theme(
       text = element_text(size = 12),
       strip.text = element_text(size = 12),
