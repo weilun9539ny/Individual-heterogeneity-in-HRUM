@@ -208,11 +208,17 @@ compute_immigrant_AME <- function(mod, file, is_cluster = T) {
       model = mod, vcov = cluster,
       variables = c("Gender.", "JobExperience.", "JobPlans.", "PriorTripstoUS.", "Language.")
     )
-    AME.prof <- avg_comparisons(  # AME of profession
-      model = mod, vcov = cluster, variables = "Profession.",
-      newdata = subset(immigrant, Education. %in% high_edu)  # compute w/ only high education
+    AME.prof_full <- avg_comparisons(  # AME of profession of all education
+      model = mod, vcov = cluster, variables = "Profession."
     )
-    print("prof done") ########
+    AME.prof_sub <- avg_comparisons(  # AME of profession w/ only high education
+      model = mod, vcov = cluster, variables = "Profession.",
+      newdata = subset(immigrant, Education. %in% high_edu)
+    )
+    AME.prof <- bind_rows(
+      AME.prof_full %>% filter(!contrast %in% paste(high_prof, "- Janitor")),
+      AME.prof_sub %>% filter(contrast %in% paste(high_prof, "- Janitor"))
+    )
     AME.educ <- avg_comparisons(  # AME of education state
       model = mod, vcov = cluster, variables = "Education.",
       newdata = subset(immigrant, !Profession. %in% high_prof)  # compute w/o special professions
@@ -221,13 +227,20 @@ compute_immigrant_AME <- function(mod, file, is_cluster = T) {
       model = mod, vcov = cluster, variables = "Origin.",
       newdata = subset(immigrant, ApplicationReason. != "ApplicationReason.3")  # compute w/o escape persecution
     )
-    AME.appl <- avg_comparisons(  # AME of application reason
+    AME.appl_full <- avg_comparisons(  # AME of application reason for all countrys
+      model = mod, vcov = cluster, variables = "ApplicationReason."
+    )
+    AME.appl_sub <- avg_comparisons(  # AME of application reason w/ only from dangerous country
       model = mod, vcov = cluster, variables = "ApplicationReason.",
-      newdata = subset(immigrant, Origin. %in% danger_ctry)  # compute w/ only from dangerous country
+      newdata = subset(immigrant, Origin. %in% danger_ctry)
+    )
+    AME.appl <- bind_rows(
+      AME.appl_full %>% filter(contrast == "ApplicationReason.2 - ApplicationReason.1"),
+      AME.appl_sub %>% filter(contrast == "ApplicationReason.3 - ApplicationReason.1")
     )
     
     # combine AMEs
-    AME <- rbind(
+    AME <- bind_rows(
       AME.indep, 
       AME.prof,
       AME.educ,
@@ -238,3 +251,144 @@ compute_immigrant_AME <- function(mod, file, is_cluster = T) {
   }
 }
 
+
+compute_immigrant_AME.cl <- function(mod, dat, file, V, VCL) {
+  # `mod` is the target model
+  # `file` is the path to the AME object
+  # `V` is the covariance matrix
+  f <- formula(mod)
+  f.clean <- update(f, . ~ . - strata(trial_id))
+  beta.all <- coef(mod)
+  X.comp.all <- model.matrix(f.clean, data = dat[dat$alt_id, ])
+  beta.clean <- beta.all
+  beta.clean[is.na(beta.clean)] <- 0
+  est.id <- !is.na(beta.all)
+  
+  # Define functions for this function
+  get_avg_pred <- function(beta_vec, target_var, target_level, subset_id = NULL) {
+  # compute average prediction for delta method
+    b.full <- beta.all
+    b.full[est.id] <- beta_vec
+    b.full[is.na(b.full)] <- 0
+    
+    # counter-factual data
+    df_cf <- dat
+    df_cf[[target_var]] <- factor(target_level, levels = levels(df[[target_var]]))
+    X.target <- model.matrix(f.clean, data = df_cf)[, names(b.full)]
+    X.comp <- X.comp.all[, names(b.full)]
+    
+    V.target <- X.target %*% b.full
+    V.comp <- X.comp %*% b.full
+    probs <- 1 / (1 + exp(V.comp - V.target))
+    
+    if (!is.null(subset_id)) {
+      return(mean(probs[subset_id], na.rm = TRUE))
+    } else {
+      return(mean(probs, na.rm = TRUE))
+    }
+  }
+  
+  calc_AME_se <- function(variable, lvl, subset_dat = NULL) {
+    s_id <- if(!is.null(subset_dat)) which(dat$id %in% subset_dat$id) else NULL
+    
+    lvl_ref <- levels(dat[[variable]])[1]
+    lvl_target <- lvl
+    cat("  Computing [", lvl_target, "] vs [", lvl_ref, "]\n", sep="")
+    
+    # 1. Estimate AME
+    b.est <- beta.all[est.id]
+    mu_ref <- get_avg_pred(b.est, variable, lvl_ref, s_id)
+    mu_target <- get_avg_pred(b.est, variable, lvl_target, s_id)
+    ame <- mu_target - mu_ref
+    
+    # 2. Compute gradient
+    grad <- jacobian(
+      function(b) {
+        m_t <- get_avg_pred(b, variable, lvl_target, s_id)
+        m_r <- get_avg_pred(b, variable, lvl_ref, s_id)
+        return(m_t - m_r)
+      },
+      x = b.est, method = "simple"
+    )
+    
+    # 3. Delta Method : SE = sqrt( grad %*% V %*% t(grad) )
+    # make sure there is no NAs in matrice
+    V.sub <- V[est.id, est.id]
+    VCL.sub <- VCL[est.id, est.id]
+    # grad[is.na(grad)] <- 0
+    se <- sqrt(as.numeric(grad %*% V.sub %*% t(grad)))
+    robust_se <- sqrt(as.numeric(grad %*% VCL.sub %*% t(grad)))
+    
+    # 4. output
+    return(data.frame(
+      attribute = variable,
+      term = lvl_target,
+      estimate = ame,
+      std.error = se,
+      robust.se = robust_se
+    ))
+  }
+  
+  # start
+  if (file.exists(file)) {
+    cat("File Found! \nReading file... \n\n")
+    res <- read_rds(file)
+  } else {
+    cat("File not found! \nComputing AME... \n\n")
+    # initialization
+    AME <- data.frame()
+    
+    # prepare for filtering
+    high_edu <- paste0("Education.", 5:7)
+    high_prof <- unique(dat$Profession.)[8:11]
+    low_prof <- setdiff(levels(dat$Profession.), high_prof)[-1]
+    danger_ctry <- unique(dat$Origin.)[c(1, 8:10)]
+    
+    # calculate AME of all the contrasts
+    # independent variables
+    for (var in c("Gender.", "JobExperience.", "JobPlans.", "PriorTripstoUS.", "Language.")) {
+      cat("Variable:", var, "\n")
+      for (lvl in levels(dat[[var]])[-1]) {
+        AME <- AME %>%
+          bind_rows(calc_AME_se(var, lvl))
+      }
+    }
+    # unrestricted professions
+    cat("Variable: Profession.\n")
+    for (lvl in low_prof) {
+    AME <- AME %>%
+    bind_rows(calc_AME_se("Profession.", lvl))
+    }
+    # restricted professions
+    for (lvl in high_prof) {
+      sub <- dat %>% filter(Education. %in% high_edu)
+      AME <- AME %>%
+        bind_rows(calc_AME_se("Profession.", lvl, sub))
+    }
+    # education
+    cat("Variable: Education.\n")
+    for (lvl in levels(dat$Education.)[-1]) {
+      sub <- dat %>% filter(!Profession. %in% high_prof)
+      AME <- AME %>%  # compute w/o special professions
+        bind_rows(calc_AME_se("Education.", lvl, sub))
+    }
+    # origin
+    cat("Variable: Origin.\n")
+    for (lvl in levels(dat$Origin.)[-1]) {
+      sub <- dat %>% filter(ApplicationReason. != "ApplicationReason.3")
+      AME <- AME %>%  # compute w/o escaping persecution
+        bind_rows(calc_AME_se("Origin.", lvl, sub))
+    }
+    # unrestricted application reason
+    cat("Variable: ApplicationReason.\n")
+    AME <- AME %>%  # AME of application reason for all countrys
+      bind_rows(calc_AME_se("ApplicationReason.", "ApplicationReason.2"))
+    # restricted application reason
+    sub <- dat %>% filter(Origin. %in% danger_ctry)
+    AME <- AME %>%  # AME of application reason w/ only from dangerous country
+      bind_rows(calc_AME_se("ApplicationReason.", "ApplicationReason.3", sub))
+    
+    write_rds(AME, file)
+    return(AME)
+  }
+}
