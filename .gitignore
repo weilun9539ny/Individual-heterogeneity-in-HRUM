@@ -54,6 +54,7 @@ rsconnect/
 # data
 *.rds
 *.dta
+*.csv
 
 # results
 *.png
