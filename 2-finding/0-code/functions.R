@@ -253,41 +253,53 @@ compute_immigrant_AME <- function(mod, file, is_cluster = T) {
 }
 
 
-compute_immigrant_AME.cl <- function(mod, dat, file, V, VCL) {
+compute_immigrant_AME.2 <- function(mod, dat, file, V, VCL, model_type = "cl") {
   # `mod` is the target model
   # `file` is the path to the AME object
   # `V` is the covariance matrix
+  names_mod <- names(coef(mod)[!is.na(coef(mod))])
+  names_V <- colnames(V)
+  names_VCL <- colnames(VCL)
+  valid_names <- intersect(intersect(names_V, names_VCL), names_mod)
+  
   f <- formula(mod)
   f.clean <- update(f, . ~ . - strata(trial_id))
-  beta.all <- coef(mod)
-  X.comp.all <- model.matrix(f.clean, data = dat[dat$alt_id, ])
-  beta.clean <- beta.all
-  beta.clean[is.na(beta.clean)] <- 0
-  est.id <- !is.na(beta.all)
+  b_est <- coef(mod)[valid_names]
+  V <- V[valid_names, valid_names]
+  VCL <- VCL[valid_names, valid_names]
+  
+  if (model_type == "cl") {
+    X.comp.all <- model.matrix(f.clean, data = dat[dat$alt_id, ])
+    X.comp.all <- X.comp.all[, valid_names, drop=F]
+  }
   
   # Define functions for this function
   get_avg_pred <- function(beta_vec, target_var, target_level, subset_id = NULL) {
-  # compute average prediction for delta method
-    b.full <- beta.all
-    b.full[est.id] <- beta_vec
-    b.full[is.na(b.full)] <- 0
-    
+  # get average prediction for glm  E.g., OLS, logistic
     # counter-factual data
     df_cf <- dat
-    df_cf[[target_var]] <- factor(target_level, levels = levels(df[[target_var]]))
-    X.target <- model.matrix(f.clean, data = df_cf)[, names(b.full)]
-    X.comp <- X.comp.all[, names(b.full)]
+    df_cf[[target_var]] <- factor(target_level, levels = levels(dat[[target_var]]))
+    X.target <- model.matrix(f.clean, data = df_cf)[, valid_names, drop=F]
+    V.target <- X.target %*% beta_vec
     
-    V.target <- X.target %*% b.full
-    V.comp <- X.comp %*% b.full
-    probs <- 1 / (1 + exp(V.comp - V.target))
+    # compute probability
+    if (model_type == "cl") {
+      V.comp <- X.comp.all %*% beta_vec
+      probs <- 1 / (1 + exp(V.comp - V.target))
+    } else if (model_type == "logit") {
+      probs <- 1 / (1 + exp(-V.target))
+    } else {
+      probs <- V.target  # OLS
+    }
     
+    # output average probability
     if (!is.null(subset_id)) {
       return(mean(probs[subset_id], na.rm = TRUE))
     } else {
       return(mean(probs, na.rm = TRUE))
     }
   }
+  
   
   calc_AME_se <- function(variable, lvl, subset_dat = NULL) {
     s_id <- if(!is.null(subset_dat)) which(dat$id %in% subset_dat$id) else NULL
@@ -297,9 +309,8 @@ compute_immigrant_AME.cl <- function(mod, dat, file, V, VCL) {
     cat("  Computing [", lvl_target, "] vs [", lvl_ref, "]\n", sep="")
     
     # 1. Estimate AME
-    b.est <- beta.all[est.id]
-    mu_ref <- get_avg_pred(b.est, variable, lvl_ref, s_id)
-    mu_target <- get_avg_pred(b.est, variable, lvl_target, s_id)
+    mu_ref <- get_avg_pred(b_est, variable, lvl_ref, s_id)
+    mu_target <- get_avg_pred(b_est, variable, lvl_target, s_id)
     ame <- mu_target - mu_ref
     
     # 2. Compute gradient
@@ -309,16 +320,14 @@ compute_immigrant_AME.cl <- function(mod, dat, file, V, VCL) {
         m_r <- get_avg_pred(b, variable, lvl_ref, s_id)
         return(m_t - m_r)
       },
-      x = b.est, method = "simple"
+      x = b_est, method = "simple"
     )
     
     # 3. Delta Method : SE = sqrt( grad %*% V %*% t(grad) )
     # make sure there is no NAs in matrice
-    V.sub <- V[est.id, est.id]
-    VCL.sub <- VCL[est.id, est.id]
     # grad[is.na(grad)] <- 0
-    se <- sqrt(as.numeric(grad %*% V.sub %*% t(grad)))
-    robust_se <- sqrt(as.numeric(grad %*% VCL.sub %*% t(grad)))
+    se <- sqrt(as.numeric(grad %*% V %*% t(grad)))
+    robust_se <- sqrt(as.numeric(grad %*% VCL %*% t(grad)))
     
     # 4. output
     return(data.frame(
@@ -390,6 +399,137 @@ compute_immigrant_AME.cl <- function(mod, dat, file, V, VCL) {
       bind_rows(calc_AME_se("ApplicationReason.", "ApplicationReason.3", sub))
     
     write_rds(AME, file)
+    
+    cat("\nComputation finished!\n")
+    return(AME)
+  }
+}
+
+
+calc_AME <- function(mod, dat, file, V, VCL = NULL, model_type = "cl", write = T) {
+  # `mod` is the target model
+  # `file` is the path to the AME object
+  # `V` is the covariance matrix
+  names_mod <- names(coef(mod)[!is.na(coef(mod))])
+  names_V <- colnames(V)
+  if (!is.null(VCL)) names_VCL <- colnames(VCL)
+  if (is.null(VCL)) {
+    valid_names <- intersect(names_V, names_mod)
+  } else {
+    valid_names <- intersect(intersect(names_V, names_VCL), names_mod)
+  }
+  
+  f <- formula(mod)
+  f_clean <- update(f, . ~ . - strata(trial_id))
+  b_est <- coef(mod)[valid_names]
+  V <- V[valid_names, valid_names]
+  if (!is.null(VCL)) VCL <- VCL[valid_names, valid_names]
+  
+  if (model_type == "cl") {
+    X_comp_all <- model.matrix(f_clean, data = dat[dat$alt_id, ])
+    X_comp_all <- X_comp_all[, valid_names, drop=F]
+  }
+  
+  # Define functions for this function
+  get_avg_pred <- function(beta_vec, target_var, target_level, subset_id = NULL) {
+    # get average prediction for glm  E.g., OLS, logistic
+    # counter-factual data
+    df_cf <- dat
+    df_cf[[target_var]] <- factor(target_level, levels = levels(dat[[target_var]]))
+    X_target <- model.matrix(f_clean, data = df_cf)[, valid_names, drop=F]
+    V_target <- X_target %*% beta_vec
+    
+    # compute probability
+    if (model_type == "cl") {
+      V_comp <- X_comp_all %*% beta_vec
+      probs <- 1 / (1 + exp(V_comp - V_target))
+    } else if (model_type == "logit") {
+      probs <- 1 / (1 + exp(-V_target))
+    } else {
+      probs <- V_target  # OLS
+    }
+    
+    # output average probability
+    if (!is.null(subset_id)) {
+      return(mean(probs[subset_id], na.rm = TRUE))
+    } else {
+      return(mean(probs, na.rm = TRUE))
+    }
+  }
+  
+  
+  calc_AME_se <- function(variable, lvl, subset_dat = NULL) {
+    s_id <- if(!is.null(subset_dat)) which(dat$id %in% subset_dat$id) else NULL
+    
+    lvl_ref <- levels(dat[[variable]])[1]
+    lvl_target <- lvl
+    cat("  Computing [", lvl_target, "] vs [", lvl_ref, "]\n", sep="")
+    
+    # 1. Estimate AME
+    mu_ref <- get_avg_pred(b_est, variable, lvl_ref, s_id)
+    mu_target <- get_avg_pred(b_est, variable, lvl_target, s_id)
+    ame <- mu_target - mu_ref
+    
+    # 2. Compute gradient
+    grad <- jacobian(
+      function(b) {
+        m_t <- get_avg_pred(b, variable, lvl_target, s_id)
+        m_r <- get_avg_pred(b, variable, lvl_ref, s_id)
+        return(m_t - m_r)
+      },
+      x = b_est, method = "simple"
+    )
+    
+    # 3. Delta Method : SE = sqrt( grad %*% V %*% t(grad) )
+    # make sure there is no NAs in matrice
+    # grad[is.na(grad)] <- 0
+    se <- sqrt(as.numeric(grad %*% V %*% t(grad)))
+    if (!is.null(VCL)) robust_se <- sqrt(as.numeric(grad %*% VCL %*% t(grad)))
+    
+    # 4. output
+    if (!is.null(VCL)) {
+      out <- data.frame(
+        attribute = variable,
+        term = lvl_target,
+        estimate = ame,
+        std.error = se,
+        robust.se = robust_se
+      )
+    } else {
+      out <- data.frame(
+        attribute = variable,
+        term = lvl_target,
+        estimate = ame,
+        std.error = se
+      )
+    }
+    return(out)
+  }
+  
+  # start
+  if (file.exists(file)) {
+    if (write) cat("File Found! \nReading file... \n\n")
+    res <- read_rds(file)
+  } else {
+    if (write) cat("File not found! \nComputing AME... \n\n")
+    # initialization
+    AME <- data.frame()
+    
+    # calculate AME of all the contrasts
+    # independent variables
+    vars <- attr(terms(f_clean), "term.labels")
+    for (var in vars) {
+      if (write) cat("Variable:", var, "\n")
+      for (lvl in levels(dat[[var]])[-1]) {
+        AME <- AME %>%
+          bind_rows(calc_AME_se(var, lvl))
+      }
+    }
+    
+    if (write) {
+      write_rds(AME, file)
+      cat("\nComputation finished!\n")
+    }
     return(AME)
   }
 }

@@ -1,0 +1,420 @@
+---
+title: "Computing Average Marginal Effects of Models on Different Data"
+author: "Wei-Lun, Lin"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    code_folding: hide
+    toc: true
+    toc_float: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)  # data processing
+library(broom)
+library(kableExtra)  # print table
+library(survival)
+library(cjoint)
+library(marginaleffects)
+
+library(numDeriv)
+library(sandwich)
+library(lmtest)
+library(multiwayvcov)
+
+source("./0-code/functions.R")
+```
+
+<!-- -   背景: 以 OLS, logistic regression, conditional logistic regression 分析 Hainmueller et al. (2014) 的 immigrant experiment 資料，並於此文件進一步比較 1. 有無加入交互作用、2. 有無對受試者層次做 cluster-robust standand error 對於估計上的差異。 -->
+<!-- -   結果: 比較 logistic 和 conditional logistic，發現 -->
+<!-- ... OLS 得到的 AMCE 和 logistic regression 得到的估計非常接近，而 logistic 和 conditional logistic regression 的估計結果也相差不大。此外，分別比較 logistic 和 conditional logistic regression 可以發現，控制 cluster-robust standard error 前後得到的 standard error 也很類似，此結果和實驗的隨機生成 profiles 機制息息相關。 -->
+<!-- -   未來工作:... 再加入無母數的方法，先對受試者的潛在分群特徵做分群，再用模型分別 fit 資料，並比較事先和事後控制 cluster 所得到的表現。 -->
+
+
+## CANDOUR
+
+```{r import-data-CANDOUR}
+CANDOUR <- read_rds("../1-data/2-processed/CANDOUR_data.rds")
+CANDOUR <- CANDOUR %>% 
+  mutate(
+    subject = id,
+    id = row_number(),
+    alt_id = id + 2 * (id %% 2) - 1
+  )
+
+CANDOUR %>% 
+  head() %>% 
+  kable("html", caption="First 6 Rows of CANDOUR Data") %>% 
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F) %>% 
+  scroll_box(width = "100%")
+```
+
+```{r ols-CANDOUR, results='hide'}
+f.CANDOUR <- select ~ vulnerability + transmission + income + occupation + age_category
+
+ols.mod.CANDOUR <- glm(f.CANDOUR, data=CANDOUR)
+ols.vcov.CANDOUR <- vcov(ols.mod.CANDOUR)
+ols.vcovCL.CANDOUR <- vcovCL(ols.mod.CANDOUR, CANDOUR$subject)
+AME.ols.CANDOUR <- calc_AME(
+  ols.mod.CANDOUR, CANDOUR, "./2-res/1-CANDOUR/AME-CANDOUR-OLS.rds",
+  ols.vcov.CANDOUR, ols.vcovCL.CANDOUR, model_type = "ols"
+)
+
+AME.CANDOUR <- AME.ols.CANDOUR %>% 
+  as.data.frame() %>%
+  select(1:4) %>% 
+  mutate(
+    CI.lower = estimate - 1.96*std.error,
+    CI.upper = estimate + 1.96*std.error,
+  ) %>% 
+  rename_with(~ paste0(.x, ".OLS"), .cols = -c(attribute, term))
+```
+
+```{r logit-CANDOUR, results='hide'}
+logit.mod.CANDOUR <- glm(f.CANDOUR, family=binomial(), data=CANDOUR)
+logit.vcov.CANDOUR <- vcov(logit.mod.CANDOUR)
+logit.vcovCL.CANDOUR <- vcovCL(logit.mod.CANDOUR, CANDOUR$subject)
+AME.logit.CANDOUR <- calc_AME(
+  logit.mod.CANDOUR, CANDOUR, "./2-res/1-CANDOUR/AME-CANDOUR-logit.rds",
+  logit.vcov.CANDOUR, logit.vcovCL.CANDOUR, model_type = "logit"
+)
+
+AME.CANDOUR <- AME.logit.CANDOUR %>% 
+  as.data.frame() %>%
+  select(1:4) %>% 
+  mutate(
+    CI.lower = estimate - 1.96*std.error,
+    CI.upper = estimate + 1.96*std.error,
+  ) %>% 
+  rename_with(~ paste0(.x, ".logit"), .cols = -c(attribute, term)) %>% 
+  left_join(AME.CANDOUR, ., by = join_by(attribute, term))
+```
+
+```{r CL-CANDOUR, results='hide'}
+CL.mod.CANDOUR <- clogit(update(f.CANDOUR, . ~ . + strata(trial_id)), data = CANDOUR)
+CL_clus.mod.CANDOUR <- clogit(update(f.CANDOUR, . ~ . + strata(trial_id)), data = CANDOUR, method = "efron", cluster = subject)
+
+CL.vcov.CANDOUR <- vcov(CL.mod.CANDOUR)
+CL.vcovCL.CANDOUR <- vcovCL(CL_clus.mod.CANDOUR, CANDOUR$subject)
+AME.CL.CANDOUR <- calc_AME(
+  CL.mod.CANDOUR, CANDOUR, "./2-res/1-CANDOUR/AME-CANDOUR-CL.rds",
+  CL.vcov.CANDOUR, CL.vcovCL.CANDOUR, model_type = "cl"
+)
+
+AME.CANDOUR <- AME.CL.CANDOUR %>% 
+  as.data.frame() %>%
+  select(1:4) %>% 
+  mutate(
+    CI.lower = estimate - 1.96*std.error,
+    CI.upper = estimate + 1.96*std.error,
+  ) %>% 
+  rename_with(~ paste0(.x, ".CL"), .cols = -c(attribute, term)) %>% 
+  left_join(AME.CANDOUR, ., by = join_by(attribute, term))
+```
+
+```{r plot-CANDOUR}
+AME.plot.CANDOUR <- AME.CANDOUR %>% 
+  mutate(
+    term = fct_recode(
+      term,
+      "Vulnerability: Moderate" = "Moderate (Twice the average risk of COVID-19 death)",
+      "Vulnerability: High" = "High (Five times the average risk of COVID-19 death)",
+      "Transmission: Moderate" = "Moderate risk (Twice the average risk of catching and transmitting the COVID-19 virus)",
+      "Transmission: High" = "High risk (Five times the average risk of catching and transmitting the COVID-19 virus)",
+      "Age: 40 years old" = "40 years old",
+      "Age: 65 years old" = "65 years old",
+      "Age: 79 years old" = "79 years old"
+    ),
+    term = factor(term, levels = rev(term))
+  ) %>% 
+  pivot_longer(
+    cols = -c(attribute, term),
+    names_to = c(".value", "model"),
+    names_pattern = "(.*)\\.(.*)$"
+  ) %>%
+  mutate(
+    model = fct_recode(
+      model,
+      "Conditional Logit" = "CL",
+      "Logit" = "logit"
+    )
+  ) %>%
+  plot_result(., n.mod = 3) +
+  labs(
+    title = "Average Marginal Effect of CANDOUR",
+    x = "Estimated Effects", color = "Model"
+  )
+
+# ggsave("./1-figure/1-CANDOUR/AME-CANDOUR-all.png", AME.plot.CANDOUR)
+AME.plot.CANDOUR
+```
+
+
+```{r store-clean-CANDOUR}
+write.csv(AME.CANDOUR, "./2-res/1-CANDOUR/AME-CANDOUR-all.csv")
+rm(
+  ols.mod.CANDOUR, ols.vcov.CANDOUR, ols.vcovCL.CANDOUR,
+  logit.mod.CANDOUR, logit.vcov.CANDOUR, logit.vcovCL.CANDOUR,
+  CL.mod.CANDOUR, CL_clus.mod.CANDOUR, CL.vcov.CANDOUR, CL.vcovCL.CANDOUR,
+  AME.ols.CANDOUR, AME.logit.CANDOUR, AME.CL.CANDOUR, CANDOUR
+)
+```
+
+
+## Candidate Experiment
+
+```{r import-data-candidate}
+candidate <- read_rds("../1-data/2-processed/candidate_data.rds")
+candidate <- candidate %>% 
+  mutate(
+    id = row_number(),
+    alt_id = id + 2 * (id %% 2) - 1
+  )
+
+candidate %>% 
+  head() %>% 
+  kable("html", caption="First 6 Rows of Candidate Experiment") %>% 
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F) %>% 
+  scroll_box(width = "100%")
+```
+
+```{r ols-candidate, results='hide'}
+f.candidate <- select ~ MilitaryService. + Religion. + College. + Profession. + Income. + RaceEthnicity. + Age. + Gender.
+
+ols.mod.candidate <- glm(f.candidate, data=candidate)
+ols.vcov.candidate <- vcov(ols.mod.candidate)
+ols.vcovCL.candidate <- vcovCL(ols.mod.candidate, candidate$subject)
+AME.ols.candidate <- calc_AME(
+  ols.mod.candidate, candidate, "./2-res/2-candidate/AME-candidate-OLS.rds",
+  ols.vcov.candidate, ols.vcovCL.candidate, model_type = "ols"
+)
+
+AME.candidate <- AME.ols.candidate %>% 
+  as.data.frame() %>%
+  select(1:4) %>% 
+  mutate(
+    CI.lower = estimate - 1.96*std.error,
+    CI.upper = estimate + 1.96*std.error,
+    attribute = str_remove(attribute, "[.]")
+  ) %>% 
+  rename_with(~ paste0(.x, ".OLS"), .cols = -c(attribute, term))
+```
+
+```{r logit-candidate, results='hide'}
+logit.mod.candidate <- glm(f.candidate, family=binomial(), data=candidate)
+logit.vcov.candidate <- vcov(logit.mod.candidate)
+logit.vcovCL.candidate <- vcovCL(logit.mod.candidate, candidate$subject)
+AME.logit.candidate <- calc_AME(
+  logit.mod.candidate, candidate, "./2-res/2-candidate/AME-candidate-logit.rds",
+  logit.vcov.candidate, logit.vcovCL.candidate, model_type = "logit"
+)
+
+AME.candidate <- AME.logit.candidate %>% 
+  as.data.frame() %>%
+  select(1:4) %>% 
+  mutate(
+    CI.lower = estimate - 1.96*std.error,
+    CI.upper = estimate + 1.96*std.error,
+    attribute = str_remove(attribute, "[.]")
+  ) %>% 
+  rename_with(~ paste0(.x, ".logit"), .cols = -c(attribute, term)) %>% 
+  left_join(AME.candidate, ., by = join_by(attribute, term))
+```
+
+```{r CL-candidate, results='hide'}
+CL.mod.candidate <- clogit(update(f.candidate, . ~ . + strata(trial_id)), data = candidate)
+CL_clus.mod.candidate <- clogit(update(f.candidate, . ~ . + strata(trial_id)), data = candidate, method = "efron", cluster = subject)
+
+CL.vcov.candidate <- vcov(CL.mod.candidate)
+CL.vcovCL.candidate <- vcovCL(CL_clus.mod.candidate, candidate$subject)
+AME.CL.candidate <- calc_AME(
+  CL.mod.candidate, candidate, "./2-res/2-candidate/AME-candidate-CL.rds",
+  CL.vcov.candidate, CL.vcovCL.candidate, model_type = "cl"
+)
+
+AME.candidate <- AME.CL.candidate %>% 
+  as.data.frame() %>%
+  select(1:4) %>% 
+  mutate(
+    CI.lower = estimate - 1.96*std.error,
+    CI.upper = estimate + 1.96*std.error,
+    attribute = str_remove(attribute, "[.]")
+  ) %>% 
+  rename_with(~ paste0(.x, ".CL"), .cols = -c(attribute, term)) %>% 
+  left_join(AME.candidate, ., by = join_by(attribute, term))
+```
+
+```{r plot-candidate}
+AME.plot.candidate <- AME.candidate %>% 
+  mutate(term = factor(term, levels = rev(term))) %>% 
+  pivot_longer(
+    cols = -c(attribute, term),
+    names_to = c(".value", "model"),
+    names_pattern = "(.*)\\.(.*)$"
+  ) %>%
+  mutate(
+    model = fct_recode(
+      model,
+      "Conditional Logit" = "CL",
+      "Logit" = "logit"
+    )
+  ) %>%
+  plot_result(., n.mod = 3) +
+  labs(
+    title = "Average Marginal Effect of Candidate Experiment",
+    x = "Estimated Effects", color = "Model"
+  )
+
+# ggsave("./1-figure/2-candidate/AME-candidate-all.png", AME.plot.candidate)
+AME.plot.candidate
+```
+
+
+```{r store-clean-candidate}
+write.csv(AME.candidate, "./2-res/2-candidate/AME-candidate-all.csv")
+rm(
+  ols.mod.candidate, ols.vcov.candidate, ols.vcovCL.candidate,
+  logit.mod.candidate, logit.vcov.candidate, logit.vcovCL.candidate,
+  CL.mod.candidate, CL_clus.mod.candidate, CL.vcov.candidate, CL.vcovCL.candidate,
+  AME.ols.candidate, AME.logit.candidate, AME.CL.candidate, candidate
+)
+```
+
+
+## Immigrant Experiment
+
+```{r import-data-immigrant}
+immigrant <- read_rds("../1-data/2-processed/immigrant_data.rds")
+immigrant <- immigrant %>% 
+  mutate(
+    id = row_number(),
+    alt_id = id + 3 - 2 * profile
+  ) %>% 
+  mutate(
+    Education. = as.factor(paste0("Education.", as.integer(Education.))),
+    ApplicationReason. = as.factor(paste0("ApplicationReason.", as.integer(ApplicationReason.))),
+    JobExperience. = as.factor(paste0("JobExperience.", as.integer(JobExperience.))),
+    JobPlans. = as.factor(paste0("JobPlans.", as.integer(JobPlans.))),
+    PriorTripstoUS. = as.factor(paste0("PriorTripstoUS.", as.integer(PriorTripstoUS.))),
+    Language. = as.factor(paste0("Language.", as.integer(Language.)))
+  )
+
+immigrant %>% 
+  head() %>% 
+  kable("html", caption="First 6 Rows of immigrant Data") %>% 
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F) %>% 
+  scroll_box(width = "100%")
+```
+
+```{r ols-immigrant, results='hide'}
+f.immigrant <- select ~ Gender. + JobExperience. + JobPlans. + PriorTripstoUS. + Language. + Education. * Profession. + Origin. * ApplicationReason.
+
+ols.mod.immigrant <- glm(f.immigrant, data=immigrant, family = gaussian())
+ols.vcov.immigrant <- vcov(ols.mod.immigrant)
+ols.vcovCL.immigrant <- vcovCL(ols.mod.immigrant, immigrant$subject)
+
+AME.ols.immigrant <- compute_immigrant_AME.2(
+  ols.mod.immigrant, immigrant,
+  "./2-res/3-immigrant/AME-immigrant-OLS-interact-glm.rds",
+  ols.vcov.immigrant, ols.vcovCL.immigrant, model_type = "ols"
+)
+
+AME.immigrant <- AME.ols.immigrant %>% 
+  as.data.frame() %>%
+  select(1:4) %>% 
+  mutate(
+    CI.lower = estimate - 1.96*std.error,
+    CI.upper = estimate + 1.96*std.error,
+    attribute = str_remove(attribute, "[.]")
+  ) %>% 
+  rename_with(~ paste0(.x, ".OLS"), .cols = -c(attribute, term))
+```
+
+```{r logit-immigrant, results='hide'}
+logit.mod.immigrant <- glm(f.immigrant, data=immigrant, family = binomial(link="logit"))
+logit.vcov.immigrant <- vcov(logit.mod.immigrant)
+logit.vcovCL.immigrant <- vcovCL(logit.mod.immigrant, immigrant$subject)
+
+AME.logit.immigrant <- compute_immigrant_AME.2(
+  logit.mod.immigrant, immigrant, 
+  "./2-res/3-immigrant/AME-immigrant-logit-interact-glm.rds",
+  logit.vcov.immigrant, logit.vcovCL.immigrant, model_type = "logit"
+)
+
+AME.immigrant <- AME.logit.immigrant %>% 
+  as.data.frame() %>%
+  select(1:4) %>% 
+  mutate(
+    CI.lower = estimate - 1.96*std.error,
+    CI.upper = estimate + 1.96*std.error,
+    attribute = str_remove(attribute, "[.]")
+  ) %>% 
+  rename_with(~ paste0(.x, ".logit"), .cols = -c(attribute, term)) %>% 
+  left_join(AME.immigrant, ., by = join_by(attribute, term))
+```
+
+```{r CL-immigrant, results='hide'}
+CL.mod.immigrant <- clogit(update(f.immigrant, . ~ . + strata(trial_id)), data = immigrant)
+CL_clus.mod.immigrant <- clogit(update(f.immigrant, . ~ . + strata(trial_id)), data = immigrant, method = "efron", cluster = subject)
+CL.vcov.immigrant <- vcov(CL.mod.immigrant)
+CL.vcovCL.immigrant <- vcovCL(CL_clus.mod.immigrant, immigrant$subject)
+
+# compute AME with both std.error and cluster-robust std.error
+AME.CL.immigrant <- compute_immigrant_AME.2(
+  CL.mod.immigrant, immigrant,
+  "./2-res/3-immigrant/AME-immigrant-CL-interact.rds",
+  CL.vcov.immigrant, CL.vcovCL.immigrant, model_type = "cl"
+)
+
+# store computed AME
+AME.immigrant <- AME.CL.immigrant %>% 
+  as.data.frame() %>%
+  select(1:4) %>% 
+  mutate(
+    CI.lower = estimate - 1.96*std.error,
+    CI.upper = estimate + 1.96*std.error,
+    attribute = str_remove(attribute, "[.]")
+  ) %>% 
+  rename_with(~ paste0(.x, ".CL"), .cols = -c(attribute, term)) %>% 
+  left_join(AME.immigrant, ., by = join_by(attribute, term))
+```
+
+
+```{r plot-immigrant}
+AME.plot.immigrant <- AME.immigrant %>% 
+  mutate(term = factor(term, levels = rev(term))) %>% 
+  pivot_longer(
+    cols = -c(attribute, term),
+    names_to = c(".value", "model"),
+    names_pattern = "(.*)\\.(.*)$"
+  ) %>%
+  mutate(
+    model = fct_recode(
+      model,
+      "Conditional Logit" = "CL",
+      "Logit" = "logit"
+    )
+  ) %>%
+  plot_result(., n.mod = 3) +
+  labs(
+    title = "Average Marginal Effect of Immigrant Experiment",
+    x = "Estimated Effects", color = "Model"
+  )
+
+# ggsave("./1-figure/3-immigrant/AME-immigrant-all-2.png", AME.plot.immigrant)
+AME.plot.immigrant
+```
+
+```{r store-clean-immigrant}
+write.csv(AME.immigrant, "./2-res/3-immigrant/AME-immigrant-all-2.csv")
+rm(
+  ols.mod.immigrant, ols.vcov.immigrant, ols.vcovCL.immigrant,
+  logit.mod.immigrant, logit.vcov.immigrant, logit.vcovCL.immigrant,
+  CL.mod.immigrant, CL_clus.mod.immigrant, CL.vcov.immigrant, CL.vcovCL.immigrant,
+  AME.ols.immigrant, AME.logit.immigrant, AME.CL.immigrant, immigrant
+)
+```
+
+

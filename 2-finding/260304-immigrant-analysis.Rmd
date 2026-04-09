@@ -640,7 +640,7 @@ cl.plot.immigrant
 
 #### AME of Conditional Logistic Regression
 
-```{r AME-CL, echo=F}
+```{r AME-CL}
 # model & covariance matrice objects
 cl.mod <- clogit(update(form.immigrant, . ~ . + strata(trial_id)), data = immigrant)
 cl_clus.mod <- clogit(update(form.immigrant, . ~ . + strata(trial_id)), data = immigrant, method = "efron", cluster = subject)
@@ -648,7 +648,7 @@ cl.vcov <- vcov(cl.mod)
 cl.vcovCL <- vcovCL(cl_clus.mod, immigrant$subject)
 
 # compute AME w/ both std.error & cluster-robust std.error
-AME.cl <- compute_immigrant_AME.cl(cl.mod, immigrant, "./2-res/AME-immigrant-CL.rds", cl.vcov, cl.vcovCL)
+AME.cl <- compute_immigrant_AME.2(cl.mod, immigrant, "./2-res/AME-immigrant-CL.rds", cl.vcov, cl.vcovCL)
 
 # store computed AME
 AME.immigrant <- AME.cl %>% 
@@ -685,7 +685,7 @@ cl_int.vcov <- vcov(cl_int.mod)
 cl_int.vcovCL <- vcovCL(cl_int_clus.mod, immigrant$subject)
 
 # compute AME with both std.error and cluster-robust std.error
-AME.cl_int <- compute_immigrant_AME.cl(cl_int.mod, immigrant, "./2-res/AME-immigrant-CL-interact.rds", cl_int.vcov, cl_int.vcovCL)
+AME.cl_int <- compute_immigrant_AME.2(cl_int.mod, immigrant, "./2-res/AME-immigrant-CL-interact.rds", cl_int.vcov, cl_int.vcovCL)
 
 # store computed AME
 AME.immigrant <- AME.cl_int %>% 
@@ -834,4 +834,29 @@ AME.plot.all
 ```
 
 
+```{r save-est-result, include=F}
+write.csv(est.all.immigrant, "./2-res/3-immigrant/coef-immigrant-all.csv")
+write.csv(AME.immigrant, "./2-res/3-immigrant/AME-immigrant-all.csv")
+```
+
+
+```{r}
+ols.immigrant <- glm(form_int.immigrant, data=immigrant, family = gaussian())
+ols.vcov <- vcov(ols.immigrant)
+ols.vcovCL <- vcovCL(ols.immigrant, immigrant$subject)
+
+AME.OLS_int <- compute_immigrant_AME.2(ols.immigrant, immigrant, "./2-res/3-immigrant/AME-immigrant-OLS-interact-glm.rds", ols.vcov, ols.vcovCL, model_type = "ols")
+```
+
+```{r}
+logit.immigrant <- glm(form_int.immigrant, data=immigrant, family = binomial(link="logit"))
+logit.vcov <- vcov(logit.immigrant)
+logit.vcovCL <- vcovCL(logit.immigrant, immigrant$subject)
+
+AME.logit_int <- compute_immigrant_AME.2(
+  logit.immigrant, immigrant, 
+  "./2-res/3-immigrant/AME-immigrant-logit-interact-glm.rds",
+  logit.vcov, logit.vcovCL, model_type = "logit"
+)
+```
 
