@@ -1,0 +1,268 @@
+---
+title: "Compare the Estimations of Logit and Conditional Logit"
+author: "Wei-Lun, Lin"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    code_folding: hide
+    toc: true
+    toc_float: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)  # data processing
+library(broom)
+library(kableExtra)  # print table
+library(survival)
+library(cjoint)
+# library(marginaleffects)
+
+library(numDeriv)
+library(sandwich)
+library(lmtest)
+library(multiwayvcov)
+
+source("./0-code/functions.R")
+```
+
+-   背景: 由於 logit model 和 conditional logit model 很像，因此想要知道在何種情形之下，這兩種模型是等同的。 <!-- -   結果: 比較 logistic 和 conditional logistic，發現 --> <!-- ... OLS 得到的 AMCE 和 logistic regression 得到的估計非常接近，而 logistic 和 conditional logistic regression 的估計結果也相差不大。此外，分別比較 logistic 和 conditional logistic regression 可以發現，控制 cluster-robust standard error 前後得到的 standard error 也很類似，此結果和實驗的隨機生成 profiles 機制息息相關。 --> <!-- -   未來工作:... 再加入無母數的方法，先對受試者的潛在分群特徵做分群，再用模型分別 fit 資料，並比較事先和事後控制 cluster 所得到的表現。 -->
+
+## Models
+
+Under conjoint experiment design, subject $i$ is provided with $J$ alternatives, which composed of $L$ attributes, and he/she has to choose between the alternatives.
+
+### Conditional Logit Model
+
+When there are only 2 alternatives in a trial, the probability of subject $i$ choosing alternative $1$ at trial $k$ is
+
+$$
+\Pr(Y_{i1k}=1)=
+  \frac
+    {\exp(\boldsymbol{X_{i1k}\alpha})}
+    {\exp(\boldsymbol{X_{i1k}\alpha})+\exp(\boldsymbol{X_{i2k}\alpha)}}
+$$
+
+, where $Y_{ijk}\in \{0, 1\}$ denotes the chosen or not and the vector $\boldsymbol{X_{ijk}}\in \mathbb{R}^L$ denotes the values of the corresponding predictors.
+
+### Logit Model
+
+The probability of subject $i$ choosing alternative $j$ at trial $k$ is
+
+$$
+\Pr(Y_{ijk}=1)=\frac{1}{1+\exp(-(\beta_0 + \boldsymbol{X_{ijk}\beta}))}
+$$
+
+, where $\beta_0$ denotes the intercept and $\boldsymbol{\beta}\in\mathbb{R}^L$ denote the slopes.
+
+## Simulation of Conjoint Experiment with 1 Attribute
+
+### Data Generating Process
+
+Consider a conjoint experiment that there is only 1 attribute: gender: male `0` or female `1`.
+
+In the simulation, we have `5000` subjects, and they all choose between the two alternatives: male and female.
+
+$$
+p_i \sim Beta(\alpha=1, \beta=2) \\
+Y_i \sim B(n=1, p_i)
+$$
+
+```{r dat L1}
+n <- 5000
+set.seed(322)
+
+dat.L1 <- data.frame(
+  subject = 1:n,
+  trial = 1:n,
+  p1 = rbeta(n, 1, 2),
+  gender = 0,
+  alternative = 1
+) %>% 
+  rowwise() %>% 
+  mutate(select = rbinom(1, 1, p1)) %>% 
+  ungroup()
+dat.L1 <- dat.L1 %>% 
+  mutate(
+    select = 1 - select,
+    alternative = 2,
+    gender = 1
+  ) %>% 
+  bind_rows(dat.L1, .) %>% 
+  arrange(subject, alternative) %>% 
+  mutate(id = row_number(), .before = subject)
+dat.L1 %>% 
+  head() %>% 
+  kable("html", caption="Data with 1 Attribute") %>% 
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F)
+```
+
+### Data Fitting
+
+```{r logit L1}
+logit.L1 <- glm(select ~ gender, family = binomial(link = "logit"), data = dat.L1)
+summary(logit.L1)
+```
+
+```{r clogit L1}
+cl.L1 <- clogit(select ~ gender + strata(trial), data = dat.L1)
+summary(cl.L1)
+```
+
+### Result
+
+The coefficients are
+
+|   | Intercept | Gender |
+|------------------|------------------------------------|------------------|
+| Logit | $\beta_0=`r coef(logit.L1)[[1]] %>% round(3)`$ | $\beta_1=`r coef(logit.L1)[[2]] %>% round(3)`$ |
+| Conditional logit | NA | $\alpha=`r coef(cl.L1)[[1]] %>% round(3)`$ |
+
+It turns out that the slope of conditional logit model equals to the negative intercept of logit model ($-\alpha=\beta_0$), and also equals to the half of the slope of logit model ($\alpha=\beta_1/2$).
+
+When there is only 1 attribute, the predictors are $X_{i1k}=0$ and $X_{i2k}=1$, and there is only 1 trial. In conditional logit model, the the probability of subject $i$ choosing alternative $1$ be
+
+$$
+\begin{align*}
+  P_{i1, CL}
+    &= \frac{\exp(0)}{\exp(0)+\exp(\alpha)} \\
+    &= \frac{1}{1+\exp(\alpha)},
+\end{align*}
+$$
+
+and that of choosing alternative $2$ be
+
+$$
+P_{i2, CL} = \frac{\exp(\alpha)}{1+\exp(\alpha)} = 1 - P_{i1k,CL}.
+$$
+
+Let alternative $1$ be chosen $n_1$ times and alternative $2$ be chosen $n_2$ times in the whole dataset. The log likelihood function is
+
+$$
+\begin{align*}
+  l(\alpha)
+    &= \sum^n_{i=1}[Y_{i1}\cdot\ln(P_{i1,CL})+Y_{i2}\cdot \ln(P_{i2,CL})] \\
+    &= n_1\ln(P_{i1,CL})+n_2\ln(1-P_{i1,CL}).
+\end{align*}
+$$
+
+To perform maximum likelihood estimation, we set the first derivative of the log likelihood function to 0.
+
+$$
+\begin{align*}
+  \frac{\partial l(\alpha)}{\partial\alpha}
+    &= \frac{\partial l(\alpha)}{\partial P_{i1,CL}} \frac{\partial P_{i1,CL}}{\partial\alpha} = 0,
+\end{align*}
+$$
+
+then $\hat P_{i1,CL}=\frac{n_1}{n_1+n_2}$ and $\hat\alpha=\ln({n_2\over n_1})$.
+
+In logit model, the probability of subject $i$ choosing alternative $1$ is
+
+$$
+\begin{align*}
+  P_{i1, L}
+    &= \frac{1}{1+\exp(-\beta_0-0\cdot\beta_1)} \\
+    &= \frac{1}{1+\exp(-\beta_0)},
+\end{align*}
+$$
+
+and that of choosing alternative $2$ is
+
+$$
+\begin{align*}
+  P_{i2, L}
+    &= \frac{1}{1+\exp(-(\beta_0 + \beta_1))}.
+\end{align*}
+$$
+
+The log likelihood function is
+
+$$
+\begin{align*}
+  l(\beta_0, \beta_1)
+    &= \sum^n_{i=1}\sum^2_{j=1}[Y_{ij}\ln(P_{ij, L})+(1-Y_{ij})\ln(1-P_{ij, L})] \\
+    &= n_1\ln(P_{i1, L}) + n_2\ln(1-P_{i1, L}) + n_2\ln(P_{i2, L}) + n_1\ln(1-P_{i2, L}).
+\end{align*}
+$$
+
+Set the two partial derivatives to zero, and we got the maximum likelihood estimator.
+
+$$
+\begin{cases}
+  \hat\beta_0 = -\ln({n_2\over n_1}) = -\hat\alpha, \\
+  \hat\beta_1 = 2\ln({n_2\over n_1}) = 2\hat\alpha.
+\end{cases}
+$$
+
+## Simulation of Conjoint Experiment with 2 Attributes
+
+In this simulation, there are 2 binary variables: + gender: male `0` or female `1` + military: served `1` or not `0`
+
+Thus, there are *4* potential profiles. To compare all pairs of combinations, there should be ${4\choose2}=6$ trials per subject.
+
+```{r design L2}
+design.2 <- expand.grid(gender = 0:1, military = 0:1)
+ind <- combn(nrow(design.2), 2)
+trials.2 <- bind_rows(
+  design.2[ind[, 1], ]
+)
+
+for (i in 2:ncol(ind)) {
+  trials.2 <- bind_rows(trials.2, design.2[ind[, i],])
+}
+
+n_sub <- 2000
+dat.L2 <- trials.2[rep(seq_len(nrow(trials.2)), n_sub), ]
+row.names(dat.L2) <- NULL
+dat.L2 <- dat.L2 %>% 
+  mutate(
+    row.names = NULL,
+    id = row_number(),
+    subject = rep(1:n_sub, each=12),
+    trial = rep(1:(n_sub * 6), each=2),
+    .before = gender
+  )
+```
+
+```{r dat L2}
+b0 <- -1.2
+b1 <- 1.1
+b2 <- 0.8
+
+dat.L2 <- dat.L2 %>% 
+  group_by(trial) %>% 
+  mutate(
+    xb = b0 + b1 * gender + b2 * military,
+    p1 = 1 / (1 + exp(-(xb[1]-xb[2]))),
+    select = rbinom(1, 1, p1),
+    select = ifelse(row_number() == 1, select, 1 - select)
+  ) %>% 
+  ungroup() %>% 
+  select(-xb)
+dat.L2 %>% 
+  head(24) %>% 
+  kable("html", caption="Data with 2 Attributes (First 24 Rows)") %>% 
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F) %>% 
+  scroll_box(width = "100%")
+```
+
+### Data Fitting
+
+```{r logit L2}
+logit.L2 <- glm(select ~ gender + military, family = binomial(), data = dat.L2)
+summary(logit.L2)
+```
+
+```{r clogit L2}
+cl.L2 <- clogit(select ~ gender + military + strata(trial), data = dat.L2)
+summary(cl.L2)
+```
+
+The coefficients are
+
+|   | Intercept | Gender | Military |
+|---------------|---------------------------|---------------|---------------|
+| Logit | $\beta_0=`r coef(logit.L2)[[1]] %>% round(2)`$ | $\beta_1=`r coef(logit.L2)[[2]] %>% round(2)`$ | $\beta_2=`r coef(logit.L2)[[3]] %>% round(2)`$ |
+| Conditional logit | NA | $\alpha_1=`r coef(cl.L2)[[1]] %>% round(2)`$ | $\alpha_2=`r coef(cl.L2)[[2]] %>% round(2)`$ |
