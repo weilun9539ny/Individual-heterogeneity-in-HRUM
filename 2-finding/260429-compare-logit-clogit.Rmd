@@ -1,0 +1,429 @@
+---
+title: "Compare the Estimations of Logit and Conditional Logit"
+author: "Wei-Lun, Lin"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    code_folding: hide
+    toc: true
+    toc_float: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)  # data processing
+# library(broom)
+library(kableExtra)  # print table
+library(survival)
+library(cjoint)
+library(truncnorm)
+# library(marginaleffects)
+
+# library(numDeriv)
+# library(sandwich)
+# library(lmtest)
+# library(multiwayvcov)
+
+source("./0-code/functions.R")
+```
+
+<!-- -   背景: 由於 logit model 和 conditional logit model 很像，因此想要知道在何種情形之下，這兩種模型是等同的。 <!-- -   結果: 比較 logistic 和 conditional logistic，發現 --> <!-- ... OLS 得到的 AMCE 和 logistic regression 得到的估計非常接近，而 logistic 和 conditional logistic regression 的估計結果也相差不大。此外，分別比較 logistic 和 conditional logistic regression 可以發現，控制 cluster-robust standard error 前後得到的 standard error 也很類似，此結果和實驗的隨機生成 profiles 機制息息相關。 --> <!-- -   未來工作:... 再加入無母數的方法，先對受試者的潛在分群特徵做分群，再用模型分別 fit 資料，並比較事先和事後控制 cluster 所得到的表現。 -->
+
+## 1. Setting of the Conjoint Experiment
+
+**The Choice Task**
+In our experimental setting, we employ a forced-choice, paired-comparison design.
+A subject is presented with a sequence of independent trials (choice sets).
+In each trial, the subject evaluates exactly two mutually exclusive alternatives and is forced to choose their preferred option.
+
+**Attributes and Profiles**
+Each alternative is defined by a specific combination of $L$ attributes.
+To facilitate modeling, these categorical attributes are converted into dummy variables, resulting in a total of $P$ parameters.
+Thus, any given alternative can be mathematically represented as a $1 \times P$ feature vector $X$.
+To prevent perfectly predictable choices, the experimental design ensures that the two alternatives within a single trial are never perfectly identical.
+
+**Random Utility Theory (RUM)**
+The statistical modeling of the conjoint experiment is grounded in the Random Utility Model (RUM).
+RUM assumes that decision-makers act rationally to maximize their utility.
+The total latent utility $U$ that a subject derives from an alternative is assumed to consist of two additive components:
+1.  Deterministic Utility ($V$): The observable portion of utility, modeled as a linear combination of the alternative's attributes and the subject's underlying preferences (part-worth utilities), such that $V = X\boldsymbol\beta$.
+2.  Stochastic Utility ($\epsilon$): An unobservable, random error term capturing idiosyncratic preferences, unmeasured attributes, or decision noise.
+
+Under this framework, a subject will choose Alternative 1 over Alternative 2 if and only if $U_1 > U_2$.
+The goal of the Maximum Likelihood Estimation (MLE) is to recover the true preference parameters ($\beta$) based on the observed choices.
+Depending on how the probabilistic structure of the choice set is defined, researchers typically employ either standard Logistic Regression or the Conditional Logit model.
+
+
+## 2. Mathematical Notations
+
+Throughout the MLE derivation for the two models, we will use the following indices and variables:
+
+* **Indices**:
+    * $i \in \{1, \dots, n\}$: Subject.
+    * $j \in \{1, 2\}$: Alternative.
+    * $k \in \{1, \dots, K\}$: Choice task (trial).
+    * The total number of observations (rows of data in long format) is $2 \times n \times K$.
+* **Variables**:
+    * $y_{ijk} \in \{0, 1\}$: The dependent variable. It equals $1$ if subject $i$ chooses alternative $j$ in task $k$, and $0$ otherwise. Within a single task, the forced-choice condition ensures $y_{i1k} + y_{i2k} = 1$.
+    * $X_{ijk}$: A $1 \times P$ feature vector representing the attribute profile of alternative $j$.
+    * $\beta$: A $P \times 1$ vector of parameters to be estimated.
+    * $\beta_0$: The intercept term, specific to the standard Logistic Regression model.
+
+---
+
+
+## 3. Models
+
+We compare two models: logistic regression and conditional logit model.
+
+### 3.1. Logistic Regression
+
+The core assumption of standard Logistic Regression is that **each row of data (each alternative) is treated as an independent Bernoulli trial**.
+It completely ignores the mutually exclusive and competitive relationship between Alternative 1 and Alternative 2 within the same trial.
+
+#### Step 3.1.1: Define the Probability Function
+The probability $\pi_{ijk}$ that an alternative is selected is the inverse-logit transformation of its absolute utility plus the intercept:
+$$P(y_{ijk}=1) = \pi_{ijk} = \frac{\exp(\beta_0 + X_{ijk}\boldsymbol\beta_{LR})}{1 + \exp(\beta_0 + X_{ijk}\boldsymbol\beta_{LR})}$$
+
+#### Step 3.1.2: Likelihood Function
+The likelihood function $\mathcal{L}_{LR}$ is the product of the probabilities of all $2nK$ independent events occurring:
+$$\mathcal{L}(\beta_0, \boldsymbol\beta_{LR}) = \prod_{i=1}^{n} \prod_{j=1}^{2} \prod_{k=1}^{K} (\pi_{ijk})^{y_{ijk}} (1 - \pi_{ijk})^{1 - y_{ijk}}$$
+
+And the log-likelihood is:
+
+\begin{align*}
+\ell(\beta_0, \boldsymbol\beta_{LR})
+  &= \sum_{i=1}^{n} \sum_{j=1}^{2} \sum_{k=1}^{K} \left[
+      y_{ijk} \ln(\pi_{ijk}) + (1 - y_{ijk}) \ln(1 - \pi_{ijk}) 
+    \right] \\
+  &= \sum_{i=1}^{n} \sum_{j=1}^{2} \sum_{k=1}^{K} \left\{
+      y_{ijk} \ln[\frac{\exp(\beta_0 + X_{ijk}\boldsymbol\beta_{LR})}{1 + \exp(\beta_0 + X_{ijk}\boldsymbol\beta_{LR})}] +
+      (1-y_{ijk}) \ln[{1\over 1 + \exp(\beta_0 + X_{ijk}\boldsymbol\beta_{LR})}]
+    \right\}
+    
+    \\
+  &= \sum_{i=1}^{n} \sum_{j=1}^{2} \sum_{k=1}^{K} \left[ y_{ijk} (\beta_0 + X_{ijk}\boldsymbol\beta_{LR}) - \ln(1 + \exp(\beta_0 + X_{ijk}\boldsymbol\beta_{LR})) \right].
+\end{align*}
+
+#### Step 3.1.3: Derive the First Order Derivative
+To find the maximum, we take the partial derivative with respect to the parameters $\boldsymbol\beta_{LR}$ and $\beta_0$ and set them to 0:
+
+$$
+\begin{align*}
+  \frac{\partial \ell_{LR}}{\partial \boldsymbol\beta_{LR}} 
+    &= \sum_{i,k,j} \left[
+      y_{ijk} X_{ijk} 
+      - \frac{\exp(\beta_0 + X_{ijk}\boldsymbol\beta_{LR})}{1 + \exp(\beta_0 + X_{ijk}\boldsymbol\beta_{LR})} X_{ijk}
+      \right] \\
+    &= \sum_{i,k,j} (y_{ijk} - \pi_{ijk}) X_{ijk}.
+\end{align*}
+$$
+
+$$
+\begin{align*}
+  \frac{\partial \ell_{LR}}{\partial \beta_0} 
+    &= \sum_{i,k,j} \left[
+      y_{ijk}
+      - \frac{\exp(\beta_0 + X_{ijk}\boldsymbol\beta_{LR})}{1 + \exp(\beta_0 + X_{ijk}\boldsymbol\beta_{LR})}
+      \right] \\
+    &= \sum_{i,k,j} (y_{ijk} - \pi_{ijk}).
+\end{align*}
+$$
+
+
+---
+
+### 3.2 Conditional Logit
+
+The core assumption of the Conditional Logit model (McFadden's Choice Model) is that **choice behavior occurs strictly within the boundaries of the Choice Set**.
+The probability is founded on the relative comparison between the alternatives competing within the same trial.
+
+#### Step 3.2.1: Define the Probability Function
+Based on the Random Utility Model, assuming the error terms $\epsilon$ follow an i.i.d. Type I Extreme Value distribution, the probability $P_{ijk}$ that a subject chooses alternative $j$ in task $k$ depends entirely on its relative utility within the set:
+$$P(y_{ijk}=1 | \text{Choice Set } ik) = P_{ijk} = \frac{\exp(X_{ijk}\boldsymbol\beta_{CL})}{\sum_{m=1}^{2} \exp(X_{imk}\boldsymbol\beta_{CL})}$$
+
+#### Step 3.2.2: Likelihood Function
+Within the same trial, the probabilities of the two alternatives sum to $1$, and the subject must choose exactly one ($\sum_j y_{ijk} = 1$). Consequently, the probability contributed by the entire trial is simply the "probability of the chosen alternative."
+The likelihood function $\mathcal{L}_{CL}$ is the joint probability across all $n \times K$ choice sets:
+$$\mathcal{L}(\boldsymbol\beta_{CL}) = \prod_{i=1}^{n} \prod_{j=1}^{2} \prod_{k=1}^{K} (P_{ijk})^{y_{ijk}}$$
+
+, and the log-likelihood is:
+$$
+\begin{align*}
+  \ell(\boldsymbol\beta_{CL}) 
+    &= \sum_{i=1}^{n} \sum_{j=1}^{2} \sum_{k=1}^{K} y_{ijk} \ln(P_{ijk}) \\
+    &= \sum_{i=1}^{n} \sum_{j=1}^{2} \sum_{k=1}^{K} y_{ijk} \ln\left[
+      \frac{\exp(X_{ijk}\boldsymbol\beta_{CL})}{\sum_{m=1}^{2} \exp(X_{imk}\boldsymbol\beta_{CL})}
+      \right] \\
+    &= \sum_{i=1}^{n} \sum_{j=1}^{2} \sum_{k=1}^{K} y_{ijk} \left[
+      X_{ijk}\boldsymbol\beta_{CL} - \ln\left(
+      \sum_{m=1}^{2} \exp(X_{imk}\boldsymbol\beta_{CL})\right)
+      \right].
+\end{align*}
+$$
+
+
+<!-- We separate the equation into two terms and simplify the second term using the property $\sum_{j=1}^2 y_{ijk} = 1$: -->
+<!-- $$\ell_{CL}(\beta) = \sum_{i,k,j} y_{ijk} (X_{ijk}\beta) - \sum_{i,k} \ln \left( \sum_{m=1}^{2} \exp(X_{ikm}\beta) \right)$$ -->
+
+#### Step 3.2.3: Derive the First Order Derivative
+Take the partial derivative with respect to the parameter $\boldsymbol\beta_{CL}$:
+$$
+\begin{align*}
+  \frac{\partial \ell(\boldsymbol\beta_{CL})}{\partial \boldsymbol\beta_{CL}}
+    &= \sum_{i=1}^{n} \sum_{j=1}^{2} \sum_{k=1}^{K} \left[ y_{ijk} X_{ijk} - \frac{\exp(X_{ijk}\boldsymbol\beta_{CL}) X_{ijk}}{\sum_{m=1}^2 \exp(X_{imk}\boldsymbol\beta_{CL})} \right] \\
+    &= \sum_{i=1}^{n} \sum_{j=1}^{2} \sum_{k=1}^{K}(y_{ijk} - P_{ijk})X_{ijk}.
+\end{align*}
+$$
+
+
+## 4. Simulation
+
+### 4.1. Conjoint Experiment Design Setup
+
+The simulation employs a forced-choice, paired-comparison conjoint experiment framework.
+
+* **Choice Sets:** Each choice task consists of exactly two mutually exclusive alternatives (Alternative A and Alternative B).
+* **Attributes and Levels:** The number of attributes, denoted as $L$, is manipulated systematically as an experimental condition (e.g., $L \in \{1, 2, 3, 5, 8, 9, 10, 11\}$). Every attribute is binary, possessing exactly two levels (coded as 0 and 1).
+* **Orthogonality and Distinctiveness:** The choice sets are derived from a full factorial design space ($2^L$ possible profiles) with two strict constraints applied to the pairs:
+    1.  **No Ties:** The two alternatives within a single choice set are strictly distinct. Pairs with identical profiles across all attributes are excluded.
+    2.  **No Repetitions:** Each paired combination is unique. Profiles like (profile $i$ vs profile $j$) and (profile $j$ vs profile $i$) are treated as the same underlying choice set. 
+* **Position Bias Control:** The left-right (or top-bottom) placement of the two alternatives within a trial is completely randomized with a 50% probability to ensure the baseline choice probability remains perfectly symmetric at 0.5 (yielding a theoretical intercept of 0).
+
+### 4.2. Data Generating Process (Simulation Setup)
+
+The synthetic data is generated based on the Random Utility Model (RUM) framework. To ensure robustness, the simulation utilizes a Monte Carlo approach with multiple random draws for the true parameters.
+
+* **Sample Size and Trials:** The simulation specifies $N = 300$ subjects. Each subject completes $K = 10$ choice trials. (Note: For low-dimensional designs where $L=1$, the number of trials is automatically capped at the maximum possible number of unique choice sets to strictly prevent repetition).
+* **True Part-Worth Utilities ($\beta$):** To reflect realistic preference variation and to prevent algorithmic breakdown (e.g., complete separation caused by dominant alternatives), the true utility coefficients are drawn from a truncated normal distribution: 
+
+$$
+\beta \sim \mathcal{N}(0, 1) \quad \text{bounded by } [-2.5, 2.5]
+$$
+
+To marginalize out specific parameter-draw biases, multiple independent sets of $\beta$ are drawn for each experimental condition.
+* **Decision Rule:** The total utility $U$ of alternative $j$ for subject $i$ in trial $k$ is formulated as:
+
+$$
+U_{ijk} = X_{ijk}\boldsymbol{\beta} + \epsilon_{ijk},
+$$
+
+where $X_{ijk}$ is the row vector of attribute levels, and $\epsilon_{ijk}$ is the pure random error term drawn from an independent and identically distributed (i.i.d.) Type I Extreme Value (Gumbel) distribution. The subject strictly chooses the alternative that yields the highest total utility (i.e., $Y_{ij^*k} = 1$ if $U_{ij^*k} > U_{ijk}$, and $0$ otherwise).
+
+
+```{r func-simulation}
+#' 向量化且極速的 Conjoint 模擬 (嚴格正交無平局設計)
+run_orthogonal_conjoint_sim <- function(n_sims = 100, n_subj = 300, n_trials = 10, n_attr = 1, true_beta = c(1.5)) {
+  
+  # 1. 預先建立選項庫與配對庫
+  profiles <- as.matrix(expand.grid(replicate(n_attr, c(0, 1), simplify = FALSE)))
+  colnames(profiles) <- paste0("X", 1:n_attr)
+  n_profiles <- nrow(profiles)
+  
+  valid_pairs <- combn(1:n_profiles, 2)
+  max_possible_trials <- ncol(valid_pairs)
+  actual_trials <- min(n_trials, max_possible_trials)
+  
+  total_obs <- n_subj * actual_trials * 2
+  trial_ids <- rep(1:(n_subj * actual_trials), each = 2)
+  
+  res_cl <- matrix(NA, nrow = n_sims, ncol = n_attr)
+  res_lr <- matrix(NA, nrow = n_sims, ncol = n_attr + 1)
+  
+  f_lr <- as.formula(paste("choice ~", paste(colnames(profiles), collapse = " + ")))
+  f_cl <- as.formula(paste("choice ~", paste(colnames(profiles), collapse = " + "), "+ strata(trial_id)"))
+  
+  for (s in 1:n_sims) {
+    # --- 極速向量化資料生成 ---
+    # 1. 一次性為所有受試者抽出 actual_trials 個不重複組合
+    # replicate 會產生 actual_trials x n_subj 的矩陣，轉為 vector 即可攤平
+    sampled_pairs_idx <- as.vector(replicate(n_subj, sample(1:max_possible_trials, actual_trials, replace = FALSE)))
+    
+    idx1 <- valid_pairs[1, sampled_pairs_idx]
+    idx2 <- valid_pairs[2, sampled_pairs_idx]
+    
+    # 2. 隨機對調左右順序避免位置偏誤
+    swap <- runif(length(idx1)) > 0.5
+    temp <- idx1
+    idx1[swap] <- idx2[swap]
+    idx2[swap] <- temp[swap]
+    
+    # 3. 建立 Design Matrix (X)
+    X <- matrix(0, nrow = total_obs, ncol = n_attr)
+    X[c(TRUE, FALSE), ] <- profiles[idx1, ] # 偶數列放選項 1
+    X[c(FALSE, TRUE), ] <- profiles[idx2, ] # 奇數列放選項 2
+    
+    # 4. 矩陣運算計算效用與機率
+    V <- X %*% true_beta
+    eps <- -log(-log(runif(total_obs))) 
+    U <- V + eps
+    
+    U_mat <- matrix(U, ncol = 2, byrow = TRUE)
+    winner <- max.col(U_mat) 
+    
+    choice <- as.numeric(rep(c(1, 2), times = total_obs/2) == rep(winner, each = 2))
+    
+    # 組裝 Dataframe 以供模型配適
+    df <- data.frame(trial_id = trial_ids, choice = choice)
+    df <- cbind(df, as.data.frame(X))
+    colnames(df)[3:(2+n_attr)] <- colnames(profiles)
+    
+    # --- 模型配適 ---
+    fit_cl <- clogit(f_cl, data = df)
+    res_cl[s, ] <- coef(fit_cl)
+    
+    suppressWarnings({ fit_lr <- glm(f_lr, family = binomial, data = df) })
+    res_lr[s, ] <- coef(fit_lr)
+  }
+  
+  # 彙整與計算 (Mean, Bias, Variance, MSE)
+  mean_cl_raw <- colMeans(res_cl)
+  mean_lr_raw <- colMeans(res_lr)
+  
+  # LR 的截距項真實值理論上為 0
+  true_beta_lr <- c(0, true_beta)
+  
+  # 計算 Bias (估計平均值 - 真實值)
+  bias_cl_raw <- mean_cl_raw - true_beta
+  bias_lr_raw <- mean_lr_raw - true_beta_lr
+  
+  # 計算 Variance (跨模擬次數的變異)
+  var_cl_raw <- apply(res_cl, 2, var)
+  var_lr_raw <- apply(res_lr, 2, var)
+  
+  # 計算 MSE (Bias 的平方 + Variance)
+  mse_cl_raw <- bias_cl_raw^2 + var_cl_raw
+  mse_lr_raw <- bias_lr_raw^2 + var_lr_raw
+  
+  # 組合輸出 Dataframe，將 CL 的資料對齊 (截距項補 NA)
+  results_df <- data.frame(
+    Term         = c("Intercept", colnames(profiles)),
+    True_Beta    = true_beta_lr,
+    CL_Mean      = c(NA, mean_cl_raw),
+    LR_Mean      = mean_lr_raw,
+    CL_Bias      = c(NA, bias_cl_raw),
+    LR_Bias      = bias_lr_raw,
+    CL_Var       = c(NA, var_cl_raw),
+    LR_Var       = var_lr_raw,
+    CL_MSE       = c(NA, mse_cl_raw),
+    LR_MSE       = mse_lr_raw,
+    Ratio_LR_CL  = c(NA, mean_lr_raw[-1] / mean_cl_raw)
+  )
+}
+```
+
+
+```{r run-simulation}
+if (file.exists("./2-res/0-simulation/simulation.rds")) {
+  final_results_df <- read_rds("./2-res/0-simulation/simulation.rds")
+} else {
+  # 1. 建立更嚴謹的參數網格 (加入 beta_draw_id)
+  sim_grid <- expand.grid(
+    n_attr = c(1, 2, 3, 5, 8, 9, 10, 11),
+    # 在同一個 L 和 Beta_SD 下，我們測試 15 種完全不同的 true_beta 組合
+    beta_draw_id = 1:15
+  )
+  
+  cat("總共測試", nrow(sim_grid), "種情境組合 (包含多組獨立 Beta 抽樣)...\n")
+  all_results <- list()
+  
+  for (i in 1:nrow(sim_grid)) {
+    current_L <- sim_grid$n_attr[i]
+    current_draw_id <- sim_grid$beta_draw_id[i]
+    
+    if(i %% 20 == 0) cat(sprintf("進度 %d/%d ...\n", i, nrow(sim_grid)))
+    
+    # 確保每次抽出的 beta 組合都不同
+    set.seed(12345 + i) 
+    current_true_beta <- rtruncnorm(n = current_L, a = -2.5, b = 2.5, mean = 0, sd = 1)
+    
+    # 執行極速模擬 (為了配合多組 beta，n_sims 設為 30 即可維持穩健性與速度平衡)
+    res_df <- run_orthogonal_conjoint_sim(
+      n_sims = 30, 
+      n_subj = 300,
+      n_trials = 10,
+      n_attr = current_L,
+      true_beta = current_true_beta
+    )
+    
+    # 標記這是哪一組 beta 的結果
+    res_df <- res_df %>%
+      mutate(
+        Scenario_L = current_L,
+        Beta_Draw_ID = current_draw_id
+      )
+    
+    all_results[[i]] <- res_df
+  }
+  
+  final_results_df <- bind_rows(all_results)
+  write_rds(final_results_df, "./2-res/0-simulation/simulation.rds")
+  cat("系統性模擬完成！\n")
+}
+```
+
+
+### Plot
+
+```{r}
+# 計算每一組「獨立 true_beta」專屬的穩健縮水比例 (LR / CL)
+final_results_df %>%
+  group_by(Scenario_L, Beta_Draw_ID) %>%
+  summarise(
+    # 利用迴歸斜率算出該組特定 beta 的縮水比例
+    Robust_Shrink_Ratio = coef(lm(LR_Mean ~ 0 + CL_Mean))[1], 
+    .groups = "drop"
+  ) %>% 
+  # --- 繪製 Boxplot + Jitter (觀察特定 Beta 組合的影響) ---
+  ggplot(aes(x = as.factor(Scenario_L), y = Robust_Shrink_Ratio)) +
+    
+  # 加入箱型圖，顯示中位數與四分位距 (IQR)
+  geom_boxplot(alpha = 0.6, position = position_dodge(width = 0.8)) +
+  
+  # 加入散佈點 (每一個點代表一組完全不同的 true_beta 組合)
+  geom_jitter(aes(), 
+              position = position_jitterdodge(jitter.width = 0.15, dodge.width = 0.8), 
+              size = 1.5, alpha = 0.8) +
+  
+  # 加入 L=1 時的完美理論極限線 (0.5)
+  # geom_hline(yintercept = 0.5, linetype = "dashed", color = "red", linewidth = 1) + 
+  
+  theme_minimal() +
+  labs(
+    title = "Logistic Regression 縮水比例分佈 (多組隨機 Beta 測試)",
+    subtitle = "每一個點代表一組獨立抽樣的 true_beta；箱型圖顯示參數組合帶來的變異區間",
+    x = "屬性數量 (L)",
+    y = "穩健縮水比例 (LR / CL 迴歸斜率)"
+  ) +
+  theme(legend.position = "bottom")
+```
+
+```{r}
+final_results_df %>%
+  filter(Term == "Intercept") %>% 
+  ggplot(aes(x = as.factor(Scenario_L), y = LR_Mean)) +
+  geom_boxplot(alpha = 0.6, position = position_dodge(width = 0.8)) +
+  # 加入散佈點 (每一個點代表一組完全不同的 true_beta 組合)
+  geom_jitter(position = position_jitterdodge(jitter.width = 0.15, dodge.width = 0.8), 
+              size = 1.5, alpha = 0.8) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  theme_minimal() +
+  labs(
+    title = "Logistic Regression 截距項在正交設計下的表現",
+    x = "屬性數量 (L)",
+    y = "截距項估計均值 (Intercept)"
+  )
+```
+
+
+<!-- ```{r} -->
+<!-- final_results_df %>%  -->
+<!--   mutate( -->
+<!--     CL_Bias = CL_Bias ^ 2, -->
+<!--     LR_Bias = LR_Bias ^ 2 -->
+<!--   ) %>%  -->
+<!--   group_by(Scenario_L) %>%  -->
+
+<!-- ``` -->
+
