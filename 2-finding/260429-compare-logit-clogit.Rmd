@@ -18,6 +18,7 @@ library(kableExtra)  # print table
 library(survival)
 library(cjoint)
 library(truncnorm)
+library(latex2exp)
 # library(marginaleffects)
 
 # library(numDeriv)
@@ -67,10 +68,8 @@ Throughout the MLE derivation for the two models, we will use the following indi
 * **Variables**:
     * $y_{ijk} \in \{0, 1\}$: The dependent variable. It equals $1$ if subject $i$ chooses alternative $j$ in task $k$, and $0$ otherwise. Within a single task, the forced-choice condition ensures $y_{i1k} + y_{i2k} = 1$.
     * $X_{ijk}$: A $1 \times P$ feature vector representing the attribute profile of alternative $j$.
-    * $\beta$: A $P \times 1$ vector of parameters to be estimated.
-    * $\beta_0$: The intercept term, specific to the standard Logistic Regression model.
-
----
+    * $\boldsymbol{\beta}$: A $P \times 1$ vector of parameters to be estimated.
+    * $\beta_0$: The intercept term, specific to the logistic regression model.
 
 
 ## 3. Models
@@ -88,10 +87,10 @@ $$P(y_{ijk}=1) = \pi_{ijk} = \frac{\exp(\beta_0 + X_{ijk}\boldsymbol\beta_{LR})}
 
 #### Step 3.1.2: Likelihood Function
 The likelihood function $\mathcal{L}_{LR}$ is the product of the probabilities of all $2nK$ independent events occurring:
-$$\mathcal{L}(\beta_0, \boldsymbol\beta_{LR}) = \prod_{i=1}^{n} \prod_{j=1}^{2} \prod_{k=1}^{K} (\pi_{ijk})^{y_{ijk}} (1 - \pi_{ijk})^{1 - y_{ijk}}$$
+$$\mathcal{L}(\beta_0, \boldsymbol\beta_{LR}) = \prod_{i=1}^{n} \prod_{j=1}^{2} \prod_{k=1}^{K} (\pi_{ijk})^{y_{ijk}} (1 - \pi_{ijk})^{1 - y_{ijk}},$$
 
-And the log-likelihood is:
-
+and the log-likelihood is:
+$$
 \begin{align*}
 \ell(\beta_0, \boldsymbol\beta_{LR})
   &= \sum_{i=1}^{n} \sum_{j=1}^{2} \sum_{k=1}^{K} \left[
@@ -101,40 +100,35 @@ And the log-likelihood is:
       y_{ijk} \ln[\frac{\exp(\beta_0 + X_{ijk}\boldsymbol\beta_{LR})}{1 + \exp(\beta_0 + X_{ijk}\boldsymbol\beta_{LR})}] +
       (1-y_{ijk}) \ln[{1\over 1 + \exp(\beta_0 + X_{ijk}\boldsymbol\beta_{LR})}]
     \right\}
-    
     \\
   &= \sum_{i=1}^{n} \sum_{j=1}^{2} \sum_{k=1}^{K} \left[ y_{ijk} (\beta_0 + X_{ijk}\boldsymbol\beta_{LR}) - \ln(1 + \exp(\beta_0 + X_{ijk}\boldsymbol\beta_{LR})) \right].
 \end{align*}
+$$
 
 #### Step 3.1.3: Derive the First Order Derivative
 To find the maximum, we take the partial derivative with respect to the parameters $\boldsymbol\beta_{LR}$ and $\beta_0$ and set them to 0:
 
 $$
-\begin{align*}
-  \frac{\partial \ell_{LR}}{\partial \boldsymbol\beta_{LR}} 
-    &= \sum_{i,k,j} \left[
+\begin{cases}
+  &\frac{\partial \ell_{LR}}{\partial \boldsymbol\beta_{LR}} 
+    = \sum_{i,k,j} \left[
       y_{ijk} X_{ijk} 
       - \frac{\exp(\beta_0 + X_{ijk}\boldsymbol\beta_{LR})}{1 + \exp(\beta_0 + X_{ijk}\boldsymbol\beta_{LR})} X_{ijk}
-      \right] \\
-    &= \sum_{i,k,j} (y_{ijk} - \pi_{ijk}) X_{ijk}.
-\end{align*}
-$$
-
-$$
-\begin{align*}
-  \frac{\partial \ell_{LR}}{\partial \beta_0} 
-    &= \sum_{i,k,j} \left[
+      \right]
+    &= \sum_{i,k,j} (y_{ijk} - \pi_{ijk}) X_{ijk}, \\
+  &\frac{\partial \ell_{LR}}{\partial \beta_0} 
+    = \sum_{i,k,j} \left[
       y_{ijk}
       - \frac{\exp(\beta_0 + X_{ijk}\boldsymbol\beta_{LR})}{1 + \exp(\beta_0 + X_{ijk}\boldsymbol\beta_{LR})}
-      \right] \\
+      \right]
     &= \sum_{i,k,j} (y_{ijk} - \pi_{ijk}).
-\end{align*}
+\end{cases}
 $$
 
 
 ---
 
-### 3.2 Conditional Logit
+### 3.2. Conditional Logit
 
 The core assumption of the Conditional Logit model (McFadden's Choice Model) is that **choice behavior occurs strictly within the boundaries of the Choice Set**.
 The probability is founded on the relative comparison between the alternatives competing within the same trial.
@@ -156,10 +150,10 @@ $$
     &= \sum_{i=1}^{n} \sum_{j=1}^{2} \sum_{k=1}^{K} y_{ijk} \ln\left[
       \frac{\exp(X_{ijk}\boldsymbol\beta_{CL})}{\sum_{m=1}^{2} \exp(X_{imk}\boldsymbol\beta_{CL})}
       \right] \\
-    &= \sum_{i=1}^{n} \sum_{j=1}^{2} \sum_{k=1}^{K} y_{ijk} \left[
-      X_{ijk}\boldsymbol\beta_{CL} - \ln\left(
-      \sum_{m=1}^{2} \exp(X_{imk}\boldsymbol\beta_{CL})\right)
-      \right].
+    &= \sum_{i=1}^{n} \sum_{j=1}^{2} \sum_{k=1}^{K} y_{ijk} \left\{
+      X_{ijk}\boldsymbol\beta_{CL} - \ln\left[
+      \sum_{m=1}^{2} \exp(X_{imk}\boldsymbol\beta_{CL})\right]
+      \right\}.
 \end{align*}
 $$
 
@@ -175,6 +169,20 @@ $$
     &= \sum_{i=1}^{n} \sum_{j=1}^{2} \sum_{k=1}^{K} \left[ y_{ijk} X_{ijk} - \frac{\exp(X_{ijk}\boldsymbol\beta_{CL}) X_{ijk}}{\sum_{m=1}^2 \exp(X_{imk}\boldsymbol\beta_{CL})} \right] \\
     &= \sum_{i=1}^{n} \sum_{j=1}^{2} \sum_{k=1}^{K}(y_{ijk} - P_{ijk})X_{ijk}.
 \end{align*}
+$$
+
+
+### 3.3. Comparison Between Logistic Regression and Conditional Logit
+
+As derivation above, the log-likelihood function of logistic regression is:
+$$\ell(\beta_0, \boldsymbol\beta_{LR}) = \sum_{i=1}^{n} \sum_{j=1}^{2} \sum_{k=1}^{K} \left[ y_{ijk} (\beta_0 + X_{ijk}\boldsymbol\beta_{LR}) - \ln(1 + \exp(\beta_0 + X_{ijk}\boldsymbol\beta_{LR})) \right],$$
+and that of conditional logit is:
+$$
+\ell(\boldsymbol\beta_{CL}) =
+  \sum_{i=1}^{n} \sum_{j=1}^{2} \sum_{k=1}^{K} y_{ijk} \left\{
+      X_{ijk}\boldsymbol\beta_{CL} -
+      \ln\left[\sum_{m=1}^{2} \exp(X_{imk}\boldsymbol\beta_{CL})\right]
+    \right\}
 $$
 
 
@@ -364,42 +372,78 @@ if (file.exists("./2-res/0-simulation/simulation.rds")) {
 ```
 
 
-### Plot
+### 4.3. Result
 
-```{r}
-# 計算每一組「獨立 true_beta」專屬的穩健縮水比例 (LR / CL)
+#### 4.3.1. $\beta_{LR}\over\beta_{CL}$
+
+```{r ratio-against-L}
+# 計算每一組「獨立 true_beta」在兩個模型參數的比值 (LR / CL)
 final_results_df %>%
-  group_by(Scenario_L, Beta_Draw_ID) %>%
-  summarise(
-    # 利用迴歸斜率算出該組特定 beta 的縮水比例
-    Robust_Shrink_Ratio = coef(lm(LR_Mean ~ 0 + CL_Mean))[1], 
-    .groups = "drop"
-  ) %>% 
+  filter(Term != "Intercept") %>% 
+  # group_by(Scenario_L, Beta_Draw_ID) %>%
+  # summarise(
+  #   # 利用迴歸斜率算出該組特定 beta 的縮水比例
+  #   # Robust_Shrink_Ratio = coef(lm(LR_Mean ~ 0 + CL_Mean))[1], 
+  #   ratio = LR_Mean / CL_Mean,
+  #   .groups = "drop"
+  # ) %>% 
   # --- 繪製 Boxplot + Jitter (觀察特定 Beta 組合的影響) ---
-  ggplot(aes(x = as.factor(Scenario_L), y = Robust_Shrink_Ratio)) +
+  ggplot(aes(x = as.factor(Scenario_L), y = Ratio_LR_CL)) +
+  # geom_violin() +
     
   # 加入箱型圖，顯示中位數與四分位距 (IQR)
   geom_boxplot(alpha = 0.6, position = position_dodge(width = 0.8)) +
-  
-  # 加入散佈點 (每一個點代表一組完全不同的 true_beta 組合)
-  geom_jitter(aes(), 
-              position = position_jitterdodge(jitter.width = 0.15, dodge.width = 0.8), 
-              size = 1.5, alpha = 0.8) +
-  
-  # 加入 L=1 時的完美理論極限線 (0.5)
-  # geom_hline(yintercept = 0.5, linetype = "dashed", color = "red", linewidth = 1) + 
-  
-  theme_minimal() +
-  labs(
-    title = "Logistic Regression 縮水比例分佈 (多組隨機 Beta 測試)",
-    subtitle = "每一個點代表一組獨立抽樣的 true_beta；箱型圖顯示參數組合帶來的變異區間",
-    x = "屬性數量 (L)",
-    y = "穩健縮水比例 (LR / CL 迴歸斜率)"
+  # 
+  # # 加入散佈點 (每一個點代表一組完全不同的 true_beta 組合)
+  geom_jitter(
+    position = position_jitterdodge(jitter.width = 0.3, dodge.width = 0.8),
+    size = 1.5, alpha = 0.8
   ) +
-  theme(legend.position = "bottom")
+  theme_light() +
+  labs(
+    title = TeX("Ratio of $\\beta_{est}$ of Logistic Regression to Conditional Logit against Number of Attributes"),
+    x = "Number of Binary Attributes (L)",
+    y = TeX("$\\beta_{LR} / \\beta_{CL}$")
+  )
 ```
 
-```{r}
+Each point indicates one $\beta$ value.
+
+As we can see, when there is only 1 binary attribute, the ratio is 2.
+As the number of attributes increases, the ratio tends to decreases.
+
+```{r ratio-against-beta, message=F}
+final_results_df %>%
+  filter(Term != "Intercept") %>% 
+  # group_by(Scenario_L, Beta_Draw_ID) %>%
+  # summarise(
+  #   # 利用迴歸斜率算出該組特定 beta 的縮水比例
+  #   # Robust_Shrink_Ratio = coef(lm(LR_Mean ~ 0 + CL_Mean))[1], 
+  #   ratio = LR_Mean / CL_Mean,
+  #   .groups = "drop"
+  # ) %>% 
+  # --- 繪製 Boxplot + Jitter (觀察特定 Beta 組合的影響) ---
+  ggplot(aes(x = True_Beta, y = Ratio_LR_CL, color= as.factor(Scenario_L))) +
+  geom_smooth(method="lm", se=F, color="red", alpha=.6) +
+  geom_point(alpha=0.6) +
+  theme_light() +
+  labs(
+    title = TeX("Ratio of $\\beta_{est}$ of Logistic Regression to Conditional Logit Against $\\beta_{true}$"),
+    x = TeX("$\\beta_{true}$"),
+    y = TeX("$\\beta_{LR} / \\beta_{CL}$"),
+    color = "Number of Attributes"
+  )
+```
+
+The red line is the regression line of the ratio $\beta_{LR}\over\beta_{CL}$ against $\beta_{true}$, and the CI of the slope is $[-0.044, 0.022]$.
+Thus, there is no correlation between $\beta_{true}$ and the ratio $\beta_{LR}\over\beta_{CL}$.
+
+
+
+
+#### 4.3.2. Intercept of Logistic Regression Against Number of Attributes
+
+```{r intercept-against-L}
 final_results_df %>%
   filter(Term == "Intercept") %>% 
   ggplot(aes(x = as.factor(Scenario_L), y = LR_Mean)) +
@@ -408,22 +452,243 @@ final_results_df %>%
   geom_jitter(position = position_jitterdodge(jitter.width = 0.15, dodge.width = 0.8), 
               size = 1.5, alpha = 0.8) +
   geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  # geom_smooth(aes(x=Scenario_L), method="lm", se=F) +
   theme_minimal() +
   labs(
-    title = "Logistic Regression 截距項在正交設計下的表現",
-    x = "屬性數量 (L)",
-    y = "截距項估計均值 (Intercept)"
+    title = "Intercepts of Logistic Regression Under Different Numbers of Attributes",
+    x = "Numbers of Binary Attributes (L)",
+    y = TeX("$\\beta_0$ (Intercept of Logistic Regression)")
+  )
+```
+
+It seems that the value of $\beta_0$ has nothing to do with the numbers of attributes ($L$).
+
+```{r intercept-bias, include=F}
+final_results_df %>%
+  filter(Term == "Intercept") %>% 
+  select(c(1, 4, 12, 13)) %>% 
+  mutate(bias2 = LR_Mean^2) %>% 
+  lm(bias2 ~ Scenario_L, .) %>% 
+  summary()
+  # ggplot(aes(x = as.factor(Scenario_L), y = bias2)) +
+  # geom_boxplot(alpha = 0.6, position = position_dodge(width = 0.8)) +
+  # # 加入散佈點 (每一個點代表一組完全不同的 true_beta 組合)
+  # geom_jitter(position = position_jitterdodge(jitter.width = 0.15, dodge.width = 0.8), 
+  #             size = 1.5, alpha = 0.8) +
+  # geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  # # geom_smooth(aes(x=Scenario_L), method="lm", se=F) +
+  # theme_minimal() +
+  # labs(
+  #   title = "Intercepts of Logistic Regression Under Different Numbers of Attributes",
+  #   x = "Numbers of Binary Attributes (L)",
+  #   y = TeX("$\\beta_0$ (Intercept of Logistic Regression)")
+  # )
+```
+
+
+
+#### 4.3.3. $\text{Bias}^2$ of Estimations
+
+```{r Bias2-against-L}
+final_results_df %>%
+  filter(Term != "Intercept") %>% 
+  mutate(
+    CL_Bias = CL_Bias ^ 2,
+    LR_Bias = LR_Bias ^ 2
+  ) %>%
+  group_by(Scenario_L) %>%
+  select(c(Term, True_Beta, CL_Bias, LR_Bias, Scenario_L, Beta_Draw_ID)) %>% 
+  pivot_longer(
+    cols=ends_with("_Bias"),
+    names_to = "Model", names_pattern = "(.*)_Bias",
+    values_to = "Bias"
+  ) %>% 
+  mutate(
+    Model = recode(Model, CL="Conditional Logit", LR="Logistic Regression"),
+    Model = as.factor(Model)
+  ) %>% 
+  ggplot(aes(x=as.factor(Scenario_L), y=Bias, color=Model)) +
+  geom_boxplot(alpha = 0.6, position = position_dodge(width = 0.8)) +
+  geom_jitter(
+    position = position_jitterdodge(jitter.width = 0.3, dodge.width = 0.8),
+    size = 1.5, alpha = 0.8
+  ) +
+  labs(
+    title = TeX("Bias of the Estimation ($(\\beta_{true} - \\beta_{est})^2$)"),
+    x = "Numbers of Attributes (L)",
+    y = TeX("${Bias}^2$")
+  ) +
+  theme_light()
+```
+
+```{r Bias2-against-beta}
+final_results_df %>%
+  filter(Term != "Intercept") %>% 
+  mutate(
+    CL_Bias = CL_Bias ^ 2,
+    LR_Bias = LR_Bias ^ 2
+  ) %>%
+  group_by(Scenario_L) %>%
+  select(c(Term, True_Beta, CL_Bias, LR_Bias, Scenario_L, Beta_Draw_ID)) %>% 
+  pivot_longer(
+    cols=ends_with("_Bias"),
+    names_to = "Model", names_pattern = "(.*)_Bias",
+    values_to = "Bias"
+  ) %>% 
+  mutate(
+    Model = recode(Model, CL="Conditional Logit", LR="Logistic Regression"),
+    Model = as.factor(Model)
+  ) %>% 
+  # lm(Bias ~ True_Beta*Scenario_L*Model, .) %>% summary()
+  ggplot(aes(x=True_Beta, y=Bias, color=Model)) +
+  # ggplot(aes(x=True_Beta, y=Bias, shape=Model, color=as.factor(Scenario_L))) +
+  # geom_hline(yintercept=0, color="red") +
+  geom_point(alpha=.6) +
+  labs(
+    title = TeX("${Bias}^2$ ($(\\beta_{true} - \\beta_{est})^2$) Against $\\beta_{true}$"),
+    x = TeX("$\\beta_{true}$"),
+    y = TeX("${Bias}^2$")
+  ) +
+  theme_light()
+```
+
+The squared bias of logistic regression grow as $\beta_{true}$ moves away from zero,
+while that of conditional logit remain unaffected.
+
+
+```{r Bias2-against-beta-CL, message=F, warning=F}
+final_results_df %>%
+  filter(Term != "Intercept") %>% 
+  mutate(CL_Bias = CL_Bias ^ 2) %>%
+  group_by(Scenario_L) %>%
+  select(c(Term, True_Beta, CL_Bias, Scenario_L, Beta_Draw_ID)) %>% 
+  ggplot(aes(x=True_Beta, y=CL_Bias, color=Scenario_L)) +
+  geom_smooth(method="lm", se=F) +
+  # geom_hline(yintercept=0, color="red") +
+  geom_point(alpha=.6) +
+  labs(
+    title = TeX("${Bias}^2$ of the Conditional Logit ($(\\beta_{true} - \\beta_{CL})^2$) Against $\\beta_{true}$"),
+    x = TeX("$\\beta_{true}$"),
+    y = TeX("${Bias}^2$"),
+    color = "Number of Attributes"
+  ) +
+  theme_light()
+```
+
+Focusing on the squared bias of the conditional logit, there is no special patterns.
+
+
+#### 4.3.4. Variation of Estimation
+
+```{r Var-against-L}
+final_results_df %>%
+  filter(Term != "Intercept") %>% 
+  mutate(
+    CL_Bias = CL_Bias ^ 2,
+    LR_Bias = LR_Bias ^ 2
+  ) %>%
+  group_by(Scenario_L) %>%
+  select(c(Term, CL_Var, LR_Var, Scenario_L, Beta_Draw_ID)) %>% 
+  pivot_longer(
+    cols=ends_with("_Var"),
+    names_to = "Model", names_pattern = "(.*)_Var",
+    values_to = "Var"
+  ) %>% 
+  mutate(
+    Model = recode(Model, CL="Conditional Logit", LR="Logistic Regression"),
+    Model = as.factor(Model)
+  ) %>% 
+  ggplot(aes(x=as.factor(Scenario_L), y=Var, color=Model)) +
+  geom_boxplot(alpha = 0.6, position = position_dodge(width = 0.8)) +
+  # 加入散佈點 (每一個點代表一組完全不同的 true_beta 組合)
+  geom_jitter(
+    position = position_jitterdodge(jitter.width = 0.15, dodge.width = 0.8), 
+    size = 1.5, alpha = 0.8
+  ) +
+  labs(
+    title = "Variation of the Estimation",
+    x = "Numbers of Attributes (L)",
+    y = TeX("$Var(\\beta_{est})$")
+  ) +
+  theme_light()
+```
+
+```{r Var-against-beta}
+final_results_df %>%
+  filter(Term != "Intercept") %>% 
+  group_by(Scenario_L) %>%
+  select(c(Term, True_Beta, CL_Var, LR_Var, Scenario_L, Beta_Draw_ID)) %>% 
+  pivot_longer(
+    cols=ends_with("_Var"),
+    names_to = "Model", names_pattern = "(.*)_Var",
+    values_to = "Var"
+  ) %>% 
+  mutate(
+    Model = recode(Model, CL="Conditional Logit", LR="Logistic Regression"),
+    Model = as.factor(Model)
+  ) %>% 
+  ggplot(aes(x=True_Beta, y=Var, color=Model)) +
+  geom_point(alpha=.6) +
+  # geom_smooth(method=lm, formula = , se=F) +
+  labs(
+    title = "Variation of the Estimation",
+    x = TeX("$\\beta_{true}$"),
+    y = TeX("$Var(\\beta_{est})$")
+  ) +
+  theme_light()
+```
+
+
+```{r var-ratio-against-L}
+final_results_df %>% 
+  filter(Term != "Intercept") %>%
+  mutate(var_comp = LR_Var / CL_Var) %>% 
+  select(c(2, 12, 14)) %>% 
+  ggplot(aes(True_Beta, var_comp, color=Scenario_L)) + 
+  geom_hline(yintercept = 1, color="red") +
+  geom_point() +
+  theme_light() +
+  labs(
+    title = TeX("Ratio of Variance Against $\\beta_{true}$"),
+    x = TeX("$\\beta_{true}$"),
+    y = TeX("$Var(\\beta_{LR}) / Var(\\beta_{CL})$"),
+    color = "Number of Attributes"
   )
 ```
 
 
-<!-- ```{r} -->
-<!-- final_results_df %>%  -->
-<!--   mutate( -->
-<!--     CL_Bias = CL_Bias ^ 2, -->
-<!--     LR_Bias = LR_Bias ^ 2 -->
-<!--   ) %>%  -->
-<!--   group_by(Scenario_L) %>%  -->
+```{r MSE, include=F}
+final_results_df %>%
+  filter(Term != "Intercept") %>% 
+  mutate(
+    CL_Bias = CL_Bias ^ 2,
+    LR_Bias = LR_Bias ^ 2
+  ) %>%
+  group_by(Scenario_L) %>%
+  select(c(Term, CL_MSE, LR_MSE, Scenario_L, Beta_Draw_ID)) %>% 
+  pivot_longer(
+    cols=ends_with("_MSE"),
+    names_to = "Model", names_pattern = "(.*)_MSE",
+    values_to = "MSE"
+  ) %>% 
+  mutate(
+    Model = recode(Model, CL="Conditional Logit", LR="Logistic Regression"),
+    Model = as.factor(Model)
+  ) %>% 
+  ggplot(aes(x=as.factor(Scenario_L), y=MSE, color=Model)) +
+  geom_boxplot(alpha = 0.6, position = position_dodge(width = 0.8)) +
+  # 加入散佈點 (每一個點代表一組完全不同的 true_beta 組合)
+  geom_jitter(
+    position = position_jitterdodge(jitter.width = 0.15, dodge.width = 0.8), 
+    size = 1.5, alpha = 0.8
+  ) +
+  labs(
+    title = "MSE of the Estimation",
+    x = "Numbers of Attributes (L)",
+    y = TeX("$Var(\\beta_{est})$")
+  ) +
+  theme_light()
+```
 
-<!-- ``` -->
+
 
