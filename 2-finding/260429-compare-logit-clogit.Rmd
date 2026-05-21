@@ -185,6 +185,24 @@ $$
     \right\}
 $$
 
+When the two models are the same, the log-odds should be the same:
+$$
+\begin{align*}
+  &\ln({P_{i1k}\over P_{i2k}}) = \ln({\pi_{i1k}\over \pi_{i2k}}) \\
+  &\Rightarrow
+  \ln\left[{\exp(X_{i1k}\boldsymbol\beta_{CL})\over\exp(X_{i2k}\boldsymbol\beta_{CL})}\right]
+   = \ln\left[\frac{\exp(\beta_0+X_{i1k}\boldsymbol\beta_{LR})}{\exp(\beta_0+X_{i1k}\boldsymbol\beta_{LR}) + 1}
+      \right] - \ln\left[\frac{\exp(\beta_0+X_{i2k}\boldsymbol\beta_{LR})}{\exp(\beta_0+X_{i1k}\boldsymbol\beta_{LR}) + 1}\right] \\
+  &\Rightarrow (X_{i1k} - X_{i2k})\boldsymbol\beta_{CL} 
+    = (X_{i1k} - X_{i2k})\boldsymbol\beta_{LR} + \ln
+      \left[
+        \frac
+          {\exp(\beta_0 + X_{i2k}\boldsymbol\beta_{LR}) + 1}
+          {\exp(\beta_0 + X_{i1k}\boldsymbol\beta_{LR}) + 1}
+      \right]
+\end{align*}
+$$
+
 
 ## 4. Simulation
 
@@ -691,4 +709,11 @@ final_results_df %>%
 ```
 
 
+$$
+\begin{align*}
+\frac{1 + \exp(V_{0,ik} - \delta_{ik})}{1 + \exp(V_{0,ik} + \delta_{ik})}
+&= \frac{1 + \exp(V_{0,ik})\exp(-\delta_{ik})}{1 + \exp(V_{0,ik} + \delta_{ik})} \
+&= \frac{\exp(-\delta_{ik})\big[\exp(\delta_{ik}) + \exp(V_{0,ik})\big]}{1 + \exp(V_{0,ik} + \delta_{ik})}
+\end{align*}
+$$
 
