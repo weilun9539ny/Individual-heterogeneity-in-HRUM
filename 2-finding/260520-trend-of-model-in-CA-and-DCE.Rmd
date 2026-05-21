@@ -1,0 +1,69 @@
+---
+title: "Models Used in Conjoint Analysis and Discrete Choice Experiment"
+author: "Wei-Lun, Lin"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    code_folding: hide
+    toc: true
+    toc_float: true
+---
+
+```{r setup, include=FALSE}
+```
+
+-   背景: 由於在 conjoint analysis 中，有多種的模型會被用來分析資料，所以想從 meta analysis 找到學界從過去到現在通常都是使用哪些模型?
+-   結果: conjoint analysis (CA) 和 discrete choice experiment (DCE) 是極為類似但不同的兩種派典。在 Nouwens et al. (2025) 的 meta analysis 發現經濟學在分析 DCE 時，近年來有幾乎一半的論文會使用 multinomial logit (conditional logit)，也有幾乎一半的論文使用 mixed logit，但已經很少使用 logistic regression 或 OLS；但在政治學做 CA 時，則還是使用 OLS 來計算 AMCE。
+-   未來工作: 先暫停比較 conditional logit 和 logistic regression，轉而比較 ranked data 的 modeling。
+
+
+## Introduction
+
+Conjoint analysis 在現在不管在業界還是學界，都已經是個很常用來研究偏好的方法，也已經發展了許多的模型來協助資料分析。
+也因為方法學上長久以來的發展，需要先確定近年來學界最常被使用的方法，才能針對比較有貢獻的議題來研究
+
+
+## Difference Between Conjoint Analysis and Discrete Choice Experiment
+
+根據 Louviere et al. (2010)，conjoint analysis (CA) 和 discrete choice experiment (DCE) 其實是兩個不同的概念，但時常被混用。
+在實務應用上，兩者都使用許多的 attribute 和相對應的 levels 來建構實驗中的選項，並要求受試者對選項做選擇。
+CA 是起源於心理學，關心的是選擇行為和預測因子之間的數學關係；而 DCE 則起源於計量經濟學中的隨機效用理論 (random utility theory, RUT)，用於預測在特定選項組合中選擇某項的機率。
+因此，這兩種派典關注的重點不同，只是因為有很類似的實驗設計，因此在統計方法上常常可以互相借鑑。
+
+## Trends in Economics and Politics
+
+在經濟學，Nouwens et al. (2025) 發現近年來，大部分的論文都會使用 conditional logit 以及更複雜的 mixed logit 來分析 DCE 的資料。
+兩種模型使用的比例大致相等，但鮮少有論文使用 ordinary least squares (OLS) 或是 logistic regression 來進行分析。
+在 conditional logit 中，可將 subject $i$ 在 trial $k$ 中選擇 alternative $j$ （最多 $J$ 個 alternatives）的機率表示為:
+
+$$
+P(y_{ijk} = 1) =
+  \frac
+    {\exp(X_{ijk}\boldsymbol{\beta})}
+    {\sum_{m=1}^J\exp(X_{imk}\boldsymbol{\beta})}
+$$
+
+而 mixed logit 則是 logistic regression 的延伸，此模型允許不同的人可以有不同的 $\boldsymbol{\beta}_i$，而選擇機率為:
+
+$$
+P(y_{ijk}=1) = \int_\beta L_{ik}(\beta)f(\beta|\theta)d\beta,
+$$
+
+其中 $\beta \sim f(\beta|\theta)$，$f$ 為任意分配、$\theta$ 為一組分配的參數，$L_{ik} = \frac{\exp(X_{ijk}\beta)}{\sum_{m=1}^J\exp(X_{imk}\beta)}$ 為 logistic regression。
+
+而在政治學中，還是承襲 Hainmueller et al. (2014) 所發展的 average marginal component effect (AMCE)，因而使用 OLS 來分析 CA 的資料(de la Cuesta et al., 2022; Treger, 2025)。
+
+
+## Conclusion
+
+由於實驗關注的是對於兩個選項的取捨時，目前學界的分析方法已經使用到 conditional logit 和更進階的 mixed logit，因此 conditional logit 和 logistic regression 之間的比較已經不再那麼重要。
+也因此，後續可將研究方向轉往整合兩種不同的 response format: 在兩個選項中選一個的 binary choice 和分別對每個選項都做程度上的評分的 rank data。目前有三種方法可比較，第一種為老師在 proposal 中所提到的方法，第二種為 ordered logit，第三種則為 Hainmueller et al. (2014) 使用的 OLS 的方法。
+
+
+## Reference
+
+-    de la Cuesta, B., Egami, N., & Imai, K. (2022). Improving the External Validity of Conjoint Analysis: The Essential Role of Profile Distribution. Political Analysis, 30(1), 19–45. https://doi.org/10.1017/pan.2020.40
+-    Hainmueller, J., Hopkins, D. J., & Yamamoto, T. (2014). Causal inference in conjoint analysis: Understanding multidimensional choices via stated preference experiments. Political analysis, 22(1), 1-30. https://doi.org/10.1093/pan/mpt024
+-    Louviere, J. J., Flynn, T. N., & Carson, R. T. (2010). Discrete choice experiments are not conjoint analysis. Journal of choice modelling, 3(3), 57-72. https://doi.org/10.1016/S1755-5345(13)70014-9
+-    Nouwens, S. P. H., Marceta, S. M., Bui, M., van Dijk, D. M. A. H., Groothuis-Oudshoorn, C. G. M., Veldwijk, J., ... & de Bekker-Grob, E. W. (2025). The Evolving Landscape of Discrete Choice Experiments in Health Economics: A Systematic Review: SPH Nouwens et al. PharmacoEconomics, 43(8), 879-936. https://doi.org/10.1007/s40273-025-01495-y
+-    Treger, C. (2025). Changing the lens: The contingency of results from conjoint experiments on the outcome variable and the estimand. Research & Politics, 12(2). https://doi.org/10.1177/20531680251351238
