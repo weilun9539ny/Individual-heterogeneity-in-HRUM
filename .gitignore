@@ -56,5 +56,8 @@ rsconnect/
 *.dta
 *.csv
 
+# archive notebooks
+3-archive/
+
 # results
 *.png
